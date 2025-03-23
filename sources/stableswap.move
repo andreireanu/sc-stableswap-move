@@ -12,14 +12,13 @@ module stableswap::stableswap {
     // Define structs for different coin types
     public struct CoinA has store {}
     public struct CoinB has store {}
-    public struct CoinC has store {}
-    public struct CoinD has store {}
 
     // ======== Constants ========
-    const N_COINS: u64 = 4; // Number of coins in the pool
-    const A_PRECISION: u64 = 100; // Amplification coefficient precision
+    const A_PRECISION: u64 = 100;
+    const N_COINS: u64 = 2;
     const FEE_DENOMINATOR: u64 = 10000000; // 10^7
     const PRECISION: u64 = 1000000000; // 10^9
+    const MAX_ITERATIONS: u64 = 255;
 
     // ======== Errors ========
     const EInsufficientAmount: u64 = 0;
@@ -31,7 +30,7 @@ module stableswap::stableswap {
     const ENoConvergence: u64 = 6;
 
     // ======== Pool Structure ========
-    public struct Pool4Coins has key {
+    public struct Pool2Coins has key {
         id: UID,
         balanceA: Balance<CoinA>,
         balanceB: Balance<CoinB>,
@@ -45,7 +44,7 @@ module stableswap::stableswap {
     }
 
     // LP Token representation
-    public struct LPToken4Coins has key, store {
+    public struct LPToken2Coins has key, store {
         id: UID,
         value: u64,
     }
@@ -58,7 +57,7 @@ module stableswap::stableswap {
         admin_fee: u64,
         ctx: &mut TxContext
     ) {
-        let pool = Pool4Coins {
+        let pool = Pool2Coins {
             id: object::new(ctx),
             balanceA: balance::zero<CoinA>(),
             balanceB: balance::zero<CoinB>(),
@@ -73,82 +72,47 @@ module stableswap::stableswap {
         transfer::share_object(pool);
     }
 
-    // public entry fun add_liquidity<CoinTypeA, CoinTypeB>(
-    //     pool: &mut Pool<CoinTypeA, CoinTypeB>,
-    //     coin_a: Coin<CoinTypeA>,
-    //     coin_b: Coin<CoinTypeB>,
-    //     min_mint_amount: u64,
-    //     ctx: &mut TxContext
-    // ) {
-    //     assert!(!pool.is_killed, EPoolKilled);
 
-    //     let d0 = get_D(&pool.coin_a, &pool.coin_b, pool.amp);
+    fun get_d<CoinTypeA, CoinTypeB>(coin_a: &Balance<CoinTypeA>, coin_b: &Balance<CoinTypeB>, amp: u64): u64 {
+        // Get balances
+        let value_a = balance::value(coin_a);
+        let value_b = balance::value(coin_b);
 
-    //     let token_supply = pool.lp_supply;
-    //     if (token_supply == 0) {
-    //         assert!(coin::value<CoinTypeA>(&coin_a) > 0 && coin::value<CoinTypeB>(&coin_b) > 0, EInsufficientAmount);
-    //     };
-
-    //     balance::join(&mut pool.coin_a, coin::into_balance(coin_a));
-    //     balance::join(&mut pool.coin_b, coin::into_balance(coin_b));
-
-    //     let d1 = get_D(&pool.coin_a, &pool.coin_b, pool.amp);
-
-    //     assert!(d1 > d0, EInsufficientAmount);
-
-    //     // Calculate fees and mint amount
-    //     let mint_amount = if (token_supply > 0) {
-    //         token_supply * (d1 - d0) / d0
-    //     } else {
-    //         d1
-    //     };
-
-    //     assert!(mint_amount >= min_mint_amount, ESlippageExceeded);
-
-    //     // Mint LP tokens
-    //     let lp_token = LPToken<CoinTypeA, CoinTypeB> {
-    //         id: object::new(ctx),
-    //         value: mint_amount,
-    //     };
-    //     pool.lp_supply = pool.lp_supply + mint_amount;
-    //     transfer::public_transfer(lp_token, tx_context::sender(ctx));
-
-    // }
-
-
-    fun get_D<CoinTypeA, CoinTypeB>(coin_a: &Balance<CoinTypeA>, coin_b: &Balance<CoinTypeB>, amp: u64): u64 {
-        // Get balances from the pool's coin balances
-        let balance_a = balance::value(coin_a);
-        let balance_b = balance::value(coin_b);
-        let n_coins = N_COINS;
-
-        // Calculate sum of all balances
-        let sum = balance_a + balance_b;
-
-        if (sum == 0) {
+        let s = value_a + value_b;
+        if (s == 0) {
             return 0
         };
 
-        let mut d: u64 = sum;
-        let ann: u64 = amp * n_coins;
+        // Calculate Ann = A * n^n
+        let ann = amp * N_COINS;
 
-        // Newton's method iterations
+        // Initial guess for D using sum of balances
+        let mut d = s;
+        let mut d_prev;
+        let mut d_p;
+
+        // Newton's method
         let mut i = 0;
-        while (i < 255) {
-            let d_prev = d;
-            let mut d_prod = d;
+        while (i < MAX_ITERATIONS) {
+            // Calculate D_P = D^(n+1) / (n^n * prod(x_i))
+            d_p = d;
 
-            // Calculate D_prod = D^(n+1) / (n^n * prod(x_i))
-            // For coin_a
-            d_prod = d_prod * d / (balance_a * n_coins);
-            // For coin_b
-            d_prod = d_prod * d / (balance_b * n_coins);
+            if (value_a > 0) {
+                d_p = (d_p * d) / (value_a * N_COINS);
+            };
+            if (value_b > 0) {
+                d_p = (d_p * d) / (value_b * N_COINS);
+            };
 
-            // D = (Ann * sum + D_prod * n_coins) * D / ((Ann - A_PRECISION) * D + (n_coins + 1) * D_prod)
-            d = (ann * sum / A_PRECISION + d_prod * n_coins) * d /
-                ((ann - A_PRECISION) * d / A_PRECISION + (n_coins + 1) * d_prod);
+            // Store current d value before updating
+            d_prev = d;
 
-            // Check for convergence
+            // d = (Ann * S + D_P * n) * D / ((Ann - 1) * D + (n + 1) * D_P)
+            let numerator = (ann * s + d_p * N_COINS) * d;
+            let denominator = (ann - 1) * d + (N_COINS + 1) * d_p;
+            d = numerator / denominator;
+
+            // Check for convergence with precision of 1
             if (d > d_prev) {
                 if (d - d_prev <= 1) {
                     return d
