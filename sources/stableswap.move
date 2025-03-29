@@ -1,5 +1,5 @@
 module stableswap::stableswap {
-    use sui::balance;
+    use sui::balance::{Self, Balance};
     use sui::coin::{Self, Coin};
     use std::type_name;
     use sui::bag::{Self, Bag};
@@ -25,6 +25,7 @@ module stableswap::stableswap {
     const ELockedPool: u64 = 12;
     const ETokenAdded: u64 = 13;
     const EInvalidFirstDeposit: u64 = 14;
+    const EAlreadyAddedCoin: u64 = 15;
 
     // ======== Pool Structure ========
     public struct Pool has key {
@@ -57,11 +58,6 @@ module stableswap::stableswap {
     public struct Liquidity {         
         types: vector<String>,
         balances: Bag,
-        values: vector<u64>
-    }
-
-    // Structure to store admin fee and update balances after adding liquidity
-    public struct AdminFee {         
         values: vector<u64>
     }
 
@@ -122,6 +118,7 @@ module stableswap::stableswap {
     {
         assert!(!pool.is_locked, ELockedPool);
         let type_str_i = type_name::into_string(type_name::get<I>());
+        assert!(!vector::contains(&mut pool.types, &type_str_i), ELockedPool);
         vector::push_back(&mut pool.types, type_str_i);
         bag::add(&mut pool.balances, type_str_i, balance::zero<I>());
         vector::push_back(&mut pool.values, 0);
@@ -164,7 +161,7 @@ module stableswap::stableswap {
         liquidity
     }
 
-    public fun finish_add_liquidity(liquidity: Liquidity, pool: &mut Pool, min_mint_amount: u64, ctx: &mut TxContext) {
+    public fun finish_add_liquidity(liquidity: Liquidity, pool: &mut Pool, min_mint_amount: u64, ctx: &mut TxContext): Option<Liquidity> {
         assert!(pool.is_locked, EUnlockedPool);
 
         let Liquidity { 
@@ -213,13 +210,60 @@ module stableswap::stableswap {
                 new_value = new_value - total_fee;
                 *vector::borrow_mut<u64>(&mut pool.values, i) = new_value; 
                 vector::push_back(&mut total_fees, total_fee);
-            }
-        } 
+            };
+        } else 
+        {
+            // TO DO: Add n zero elements to admin fee
+        };
+
+        // TO DO: Mint LP
+
+        let fees_update = Liquidity {   
+            types: liquidity_types,
+            balances: liquidity_balances,      
+            values: admin_fees,
+        };
+
+        option::some(fees_update)
 
         // TO DO: ADD EVENT, USE TOTAL FEE
+    }
 
+    public fun update_balances<I>(pool: &mut Pool, mut fees_update_option: Option<Liquidity>): Option<Liquidity> {
+        let mut fees_update = option::extract(&mut fees_update_option);
+        option::destroy_none(fees_update_option);
+        let mut length = vector::length<u64>(&fees_update.values);
+        let current_fee = vector::pop_back<u64>(&mut fees_update.values);
+        let type_str_i = vector::borrow(&pool.types, length - 1);
+        let (i_present, i_index) = vector::index_of(&fees_update.types, type_str_i);
+        if (i_present) {
+            let _ = vector::remove<String>(&mut fees_update.types, i_index);
+            let add_balance = bag::remove<String, Balance<I>>(&mut fees_update.balances, *type_str_i);
+            let mut i_balance = bag::borrow_mut<String, Balance<I>>(&mut pool.balances, *type_str_i);
+            balance::join(i_balance, add_balance);
+        };
+        if (current_fee > 0) {
+            let i_balance = bag::borrow_mut<String, Balance<I>>(&mut pool.balances, *type_str_i);
+            let i_fee = balance::split(i_balance, current_fee);
+            let i_fee_balance = bag::borrow_mut(&mut pool.balances, *type_str_i);
+            balance::join(i_fee_balance, i_fee);
+        };
+        length = vector::length<u64>(&fees_update.values);
+        if (length > 0) {
+            return option::some(fees_update)
+        } else {
+            let Liquidity { 
+                types: liquidity_types,
+                balances: liquidity_balances,      
+                values: admin_fees,
+            } = fees_update; 
+            bag::destroy_empty(liquidity_balances);
+            return option::none()
+        }
 
     }
+
+
 
 
     /// Exchange one coin type for another in the pool.
