@@ -16,6 +16,11 @@ This calculates token out amount when token in amount is inserted in the pool
 
 ![Get Y Image](calculus/get_y.png)
 
+##### add_liquidity  
+Add liquidity to the pool. In this example liquidity for coins D, E, C are added. After liquidity is added, if the pool becomes unbalanced fees from all coins might be deducted so we need to call update_balances for all coins in the pool
+
+![Get Y Image](calculus/add_liquidity.jpg)
+
 
 #### References:
 StableSwap paper:           https://curve.fi/files/stableswap-paper.pdf \
