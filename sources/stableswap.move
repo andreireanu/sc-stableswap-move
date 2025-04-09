@@ -23,9 +23,13 @@ module stableswap::stableswap {
     const EWrongLiquidityCoin: u64 = 10;
     const EUnlockedPool: u64 = 11;
     const ELockedPool: u64 = 12;
-    const ETokenAdded: u64 = 13;
+    const ETokenAlreadyAdded: u64 = 13;
     const EInvalidFirstDeposit: u64 = 14;
     const EAlreadyAddedCoin: u64 = 15;
+    const EInvalidAdd: u64 = 16;
+    const EInvalidDeposit: u64 = 17;
+    const EInvalidMinMintAmount: u64 = 18;
+    const EInvalidValue: u64 = 19;
 
     // ======== Pool Structure ========
     public struct Pool has key {
@@ -56,9 +60,10 @@ module stableswap::stableswap {
 
     // Structure to store liquidity while adding
     public struct Liquidity {         
+        values: vector<u64>,
+        admin_fees: vector<u64>,
         types: vector<String>,
-        balances: Bag,
-        values: vector<u64>
+        mint_amount: u64,
     }
 
     /// Creates a new StableSwap pool with the specified parameters.
@@ -140,58 +145,47 @@ module stableswap::stableswap {
         pool.is_locked = true;
     }
 
-    public fun init_add_liquidity(pool: &Pool, ctx: &mut TxContext): Liquidity {
+    /// Initialize the liquidity addition process.
+    /// 
+    /// # Arguments
+    /// * `pool` - The pool to add liquidity to
+    /// * `amounts` - Vector of amounts for each coin type
+    /// * `ctx` - Transaction context
+    /// 
+    /// # Aborts
+    /// * If pool is not locked
+    /// * If the number of amounts doesn't match the number of coins in the pool
+    public fun init_add_liquidity(
+        pool: &mut Pool,
+        values: vector<u64>,
+        min_mint_amount: u64,
+        ctx: &mut TxContext
+    ): Liquidity {
         assert!(pool.is_locked, EUnlockedPool);
-        Liquidity {
-            types: vector::empty(),
-            balances: bag::new(ctx),
-            values: vector::empty(),
-        }
-    }
-
-    public fun add_liquidity<I>(dx_coin: Coin<I>, mut liquidity: Liquidity, pool: &Pool): Liquidity {
-        assert!(pool.is_locked, EUnlockedPool);
-        let type_str_i = type_name::into_string(type_name::get<I>());
-        assert!(vector::contains(&pool.types, &type_str_i), EWrongLiquidityCoin);
-        assert!(!vector::contains(&liquidity.types, &type_str_i), ETokenAdded);
-        let dx = coin::value(&dx_coin);
-        vector::push_back(&mut liquidity.types, type_str_i);
-        bag::add(&mut liquidity.balances,type_str_i, coin::into_balance(dx_coin));
-        vector::push_back(&mut liquidity.values, dx);
-        liquidity
-    }
-
-    public fun finish_add_liquidity(liquidity: Liquidity, pool: &mut Pool, min_mint_amount: u64, ctx: &mut TxContext): Option<Liquidity> {
-        assert!(pool.is_locked, EUnlockedPool);
-
-        let Liquidity { 
-            types: liquidity_types, 
-            balances: liquidity_balances, 
-            values: liquidity_values 
-        } = liquidity;        
+        assert!(vector::length(&values) == pool.n_coins, EInvalidCoinNo);
+        
         let n_coins = pool.n_coins;
         let fee =  pool.fee;
         let amp = pool.amp;
         let admin_fee = pool.admin_fee;
         let token_supply = get_values_sum(&pool.values);
-        let fees = fee * n_coins / (4 * (n_coins - 1 ));                // TO DO: Check how this is derived
-
-        let liquidity_indexes = get_liquidity_indexes(pool, &liquidity_types);
+        let fees = fee * n_coins / (4 * (n_coins - 1 )); // TODO: Check how this is derived
 
         let mut d0: u64 = 0;
         if (token_supply > 0) {
             d0 = get_d(&pool.values, amp, n_coins);
         } else {
-            assert(vector::length(&liquidity_indexes) == n_coins, EInvalidFirstDeposit);
+            assert! (valid_first_deposit(&values), EInvalidFirstDeposit);
         };
 
-        let mut new_values = add_values(&pool.values, &liquidity_values, &liquidity_indexes);
+        let mut new_values = add_values(&values, &pool.values);
         let d1 = get_d(&new_values, amp, n_coins);
-
+        assert!(d1 > d0, EInvalidDeposit);
+        
+        let mut d2 = d1; 
         let mut ideal_value: u64 = 0; 
         let mut total_fees = vector::empty<u64>();
         let mut admin_fees = vector::empty<u64>();
-        let mut fees = vector::empty<u64>();
 
         if (token_supply > 0) {
             let mut i = 0;
@@ -205,67 +199,76 @@ module stableswap::stableswap {
                     new_value - ideal_value
                 };
                 let total_fee = fee * difference / FEE_DENOMINATOR;
-                let admin_fee =  total_fee * admin_fee  / FEE_DENOMINATOR;
-                vector::push_back (&mut admin_fees, admin_fee);
-                new_value = new_value - total_fee;
-                *vector::borrow_mut<u64>(&mut pool.values, i) = new_value; 
+                let fee =  total_fee * admin_fee  / FEE_DENOMINATOR;
+                *vector::borrow_mut<u64>(&mut pool.values, i) = new_value - fee; 
+                *vector::borrow_mut<u64>(&mut new_values, i) = new_value - total_fee; 
                 vector::push_back(&mut total_fees, total_fee);
+                vector::push_back(&mut admin_fees, fee);
+                i = i + 1;
             };
-        } else 
-        {
-            // TO DO: Add n zero elements to admin fee
-        };
-
-        // TO DO: Mint LP
-
-        let fees_update = Liquidity {   
-            types: liquidity_types,
-            balances: liquidity_balances,      
-            values: admin_fees,
-        };
-
-        option::some(fees_update)
-
-        // TO DO: ADD EVENT, USE TOTAL FEE
-    }
-
-    public fun update_balances<I>(pool: &mut Pool, mut fees_update_option: Option<Liquidity>): Option<Liquidity> {
-        let mut fees_update = option::extract(&mut fees_update_option);
-        option::destroy_none(fees_update_option);
-        let mut length = vector::length<u64>(&fees_update.values);
-        let current_fee = vector::pop_back<u64>(&mut fees_update.values);
-        let type_str_i = vector::borrow(&pool.types, length - 1);
-        let (i_present, i_index) = vector::index_of(&fees_update.types, type_str_i);
-        if (i_present) {
-            let _ = vector::remove<String>(&mut fees_update.types, i_index);
-            let add_balance = bag::remove<String, Balance<I>>(&mut fees_update.balances, *type_str_i);
-            let mut i_balance = bag::borrow_mut<String, Balance<I>>(&mut pool.balances, *type_str_i);
-            balance::join(i_balance, add_balance);
-        };
-        if (current_fee > 0) {
-            let i_balance = bag::borrow_mut<String, Balance<I>>(&mut pool.balances, *type_str_i);
-            let i_fee = balance::split(i_balance, current_fee);
-            let i_fee_balance = bag::borrow_mut(&mut pool.balances, *type_str_i);
-            balance::join(i_fee_balance, i_fee);
-        };
-        length = vector::length<u64>(&fees_update.values);
-        if (length > 0) {
-            return option::some(fees_update)
+            d2 = get_d(&new_values, amp, n_coins);
         } else {
-            let Liquidity { 
-                types: liquidity_types,
-                balances: liquidity_balances,      
-                values: admin_fees,
-            } = fees_update; 
-            bag::destroy_empty(liquidity_balances);
-            return option::none()
-        }
+            total_fees = empty_values(total_fees, n_coins);
+            admin_fees = empty_values(admin_fees, n_coins);
 
+            let mut i = 0;
+            while (i < n_coins) {
+                *vector::borrow_mut<u64>(&mut pool.values, i) = *vector::borrow(&new_values, i); 
+                i = i + 1;
+            };
+        };
+
+        let mint_amount = if (token_supply == 0) {
+            d1
+        } else {
+            (d2 - d0) * token_supply / d0
+        };
+
+        assert! (mint_amount > min_mint_amount, EInvalidMinMintAmount);
+
+        // TODO: Emit event with total fees 
+
+        Liquidity {
+            values,
+            admin_fees: admin_fees,
+            types: vector::empty(),
+            mint_amount: mint_amount,
+        }
     }
 
+    public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: Liquidity, pool: &mut Pool, ctx: &mut TxContext): Liquidity {
+        assert!(pool.is_locked, EUnlockedPool);
+        let type_str_i = type_name::into_string(type_name::get<I>());
+        let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i);
+        assert!(i_present, EWrongLiquidityCoin);
+        assert!(!vector::contains(&liquidity.types, &type_str_i), ETokenAlreadyAdded);
 
+        let mut dx_coin = option::extract(&mut dx_coin_option);
+        if (coin::value(&dx_coin) > 0) {
+            let dx_value = coin::value(&dx_coin);
+            let x_balance = bag::borrow_mut<String, Balance<I>>(&mut pool.balances, type_str_i);
+            let x_value = balance::value(x_balance);
 
+            let mut i_value = *vector::borrow(&pool.values, i_index);
+            let mut i_fee = *vector::borrow(&liquidity.admin_fees, i_index);
+            
+            assert!(i_value + i_fee == x_value + dx_value, EInvalidDeposit);
 
+            let fee_coin = coin::split<I>(&mut dx_coin, i_fee, ctx);
+            let dx_balance = coin::into_balance(dx_coin);
+            let fee_balance = coin::into_balance(fee_coin);
+            balance::join(x_balance, dx_balance);
+            let admin_fee_balance = bag::borrow_mut<String, Balance<I>>(&mut pool.admin_fee_balances, type_str_i);
+            balance::join(admin_fee_balance, fee_balance);
+        } else {
+            assert!(*vector::borrow(&liquidity.values, i_index) == 0, EInvalidValue);
+            coin::destroy_zero(dx_coin);
+        };
+
+        option::destroy_none(dx_coin_option);
+        liquidity
+    }
+ 
     /// Exchange one coin type for another in the pool.
     /// 
     /// # Arguments
@@ -544,42 +547,36 @@ module stableswap::stableswap {
         sum
     }
 
-    fun get_liquidity_indexes(pool: &Pool, liquidity_types: &vector<String>): vector<u64> {
-        let mut indexes = vector::empty();
+    fun add_values(values1: &vector<u64>, values2: &vector<u64>): vector<u64> {
+        let length = vector::length(values1);
+        assert!(length == vector::length(values2), EInvalidAdd);
         let mut i = 0;
-        let length = vector::length(liquidity_types);
+        let mut sum = vector::empty<u64>();
         while (i < length) {
-            let liquidity_type = *vector::borrow(liquidity_types, i);
-            let (_, type_index) = vector::index_of(&pool.types, &liquidity_type);
-            vector::push_back(&mut indexes, type_index);
+            vector::push_back(&mut sum, *vector::borrow(values1, i) + *vector::borrow(values2, i));
             i = i + 1;
         };
-        indexes
+        sum
     }
 
-    fun add_values(pool_values: &vector<u64>, liquidity_values: &vector<u64>, liquidity_indexes: &vector<u64>): vector<u64> {
-        let mut sum_values: vector<u64> =  vector::empty();
-        let mut length = vector::length(pool_values);
+    fun valid_first_deposit(values: &vector<u64>): bool {
+        let length = vector::length(values);
         let mut i = 0;
-        let mut value: u64 = 0;
-
         while (i < length) {
-            let value = *vector::borrow<u64>(pool_values, i);
-            vector::push_back(&mut sum_values, value);
+            if (*vector::borrow(values, i) == 0) {
+                return false
+            };
             i = i + 1;
         };
-
-        length = vector::length(liquidity_values);
-        i = 0;
-        while (i < length) {
-            let value = *vector::borrow<u64>(liquidity_values, i);
-            let index = *vector::borrow<u64>(liquidity_indexes, i);
-            let current_value = *vector::borrow<u64>(&sum_values, index);
-            let new_value = current_value + value;
-            *vector::borrow_mut<u64>(&mut sum_values, index) = new_value; 
-            i = i + 1;
-        };
-        sum_values
+        true
     }
- 
+
+    fun empty_values(mut values: vector<u64>, length: u64): vector<u64> {
+        let mut i = 0;
+        while (i < length) {
+            vector::push_back(&mut values, 0);
+            i = i + 1;
+        };
+        values
+    }
 }
