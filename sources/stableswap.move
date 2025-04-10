@@ -1,6 +1,6 @@
 module stableswap::stableswap {
     use sui::balance::{Self, Balance};
-    use sui::coin::{Self, Coin};
+    use sui::coin::{Self, Coin, TreasuryCap};
     use std::type_name;
     use sui::bag::{Self, Bag};
     use std::ascii::String;
@@ -39,6 +39,7 @@ module stableswap::stableswap {
         values: vector<u64>,
         n_coins: u64,
         lp_supply: u64,
+        lp_treasury: TreasuryCap<LP>,
         amp: u64,
         fee: u64,
         admin_fee: u64,
@@ -53,10 +54,8 @@ module stableswap::stableswap {
     }
 
     // LP Token representation
-    public struct LPToken has key, store {
-        id: UID,
-        value: u64,
-    }
+    public struct LP has drop {}
+
 
     // Structure to store liquidity while adding
     public struct Liquidity {         
@@ -86,6 +85,7 @@ module stableswap::stableswap {
         admin_fee: u64,
         ctx: &mut TxContext
     ) {
+        let lp_treasury = init_lp(LP {}, ctx);
         let pool = Pool {
             id: object::new(ctx),
             types: vector::empty(),
@@ -93,6 +93,7 @@ module stableswap::stableswap {
             values: vector::empty(),
             n_coins: 0,
             lp_supply: 0,
+            lp_treasury: lp_treasury,
             amp: amp,
             fee: fee,  // General fee
             admin_fee: admin_fee,    // Fee out of the general fee   
@@ -236,12 +237,13 @@ module stableswap::stableswap {
         }
     }
 
-    public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: Liquidity, pool: &mut Pool, ctx: &mut TxContext): Liquidity {
+    public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: &mut Liquidity, pool: &mut Pool, ctx: &mut TxContext): &mut Liquidity {
         assert!(pool.is_locked, EUnlockedPool);
         let type_str_i = type_name::into_string(type_name::get<I>());
         let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i);
         assert!(i_present, EWrongLiquidityCoin);
         assert!(!vector::contains(&liquidity.types, &type_str_i), ETokenAlreadyAdded);
+        vector::push_back(&mut liquidity.types, type_str_i);
 
         let mut dx_coin = option::extract(&mut dx_coin_option);
         if (coin::value(&dx_coin) > 0) {
@@ -268,7 +270,16 @@ module stableswap::stableswap {
         option::destroy_none(dx_coin_option);
         liquidity
     }
- 
+
+    public fun finish_add_liquidity(liquidity: Liquidity, pool: &mut Pool, ctx: &mut TxContext): Coin<LP> {
+        let Liquidity { values, admin_fees, types, mint_amount } = liquidity;
+        assert!(vector::length(&types) == pool.n_coins, EInvalidCoinNo);
+        
+        let coin = coin::mint(&mut pool.lp_treasury, mint_amount, ctx);
+        pool.lp_supply = pool.lp_supply + mint_amount;
+        
+        coin
+    }
     /// Exchange one coin type for another in the pool.
     /// 
     /// # Arguments
@@ -536,6 +547,13 @@ module stableswap::stableswap {
         abort ENoConvergence
     }
 
+
+    fun init_lp(witness: LP, ctx: &mut TxContext): TreasuryCap<LP> {
+        let (treasury, metadata) = coin::create_currency(witness, 9, b"SSLP", b"Stableswap LP", b"Token representing LP shares in a stableswap pool", option::none(), ctx);
+        transfer::public_freeze_object(metadata);
+        treasury
+    }
+
     fun get_values_sum(values: &vector<u64>): u64 {
         let mut sum = 0;
         let length = vector::length(values);
@@ -579,4 +597,5 @@ module stableswap::stableswap {
         };
         values
     }
+
 }
