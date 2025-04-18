@@ -5,7 +5,9 @@ module stableswap::stableswap {
     use std::type_name;
     use sui::bag::{Self, Bag};
     use std::ascii::String;
+    use stableswap::lp::LP;
     use stableswap::math::{get_d, get_y, get_values_sum, add_values, valid_first_deposit, empty_values};
+    use std::debug;
 
     // ======== Constants ========
     const FEE_DENOMINATOR: u64 = 10000;
@@ -41,12 +43,10 @@ module stableswap::stableswap {
         owner: address,
     }
 
-    public struct AdminCap has key {  
+    public struct AdminCap has key, store {  
         id: UID
     }
 
-    // LP Token representation
-    public struct LP has drop {}
 
 
     // Structure to store liquidity while adding
@@ -57,13 +57,11 @@ module stableswap::stableswap {
         mint_amount: u64,
     }
 
-
     // Structure to store liquidity while removing
     public struct RemoveLiquidity {         
         balance: Balance<LP>,
         types: vector<String>,
     }
-
 
     /// Initializes the stableswap module by creating and transferring an AdminCap to the sender.
     /// 
@@ -74,7 +72,7 @@ module stableswap::stableswap {
     /// * Creates a new AdminCap object
     /// * Transfers the AdminCap to the transaction sender
     fun init (ctx: &mut TxContext) {
-        transfer::transfer(AdminCap {id: object::new(ctx)}, tx_context::sender(ctx));
+        transfer::public_transfer(AdminCap {id: object::new(ctx)}, tx_context::sender(ctx));
     }
 
     /// Creates a new StableSwap pool with the specified parameters.
@@ -96,9 +94,9 @@ module stableswap::stableswap {
         amp: u64,
         fee: u64,
         admin_fee: u64,
+        lp_treasury: TreasuryCap<LP>,
         ctx: &mut TxContext
     ) {
-        let lp_treasury = init_lp(LP {}, ctx);
         let pool = Pool {
             id: object::new(ctx),
             types: vector::empty(),
@@ -135,7 +133,7 @@ module stableswap::stableswap {
     {
         assert!(!pool.is_locked, ELockedPool);
         let type_str_i = type_name::into_string(type_name::get<I>());
-        assert!(pool.types.contains(&type_str_i) , ELockedPool);
+        assert!(!pool.types.contains(&type_str_i) , EAlreadyAddedCoin);
         pool.types.push_back(type_str_i);
         pool.balances.add(type_str_i, balance::zero<I>());
         pool.values.push_back(0);
@@ -509,21 +507,38 @@ module stableswap::stableswap {
         get_y(i, j, dx, pool_values, amp, pool_n_coins)
     }
 
-    /// Initializes the LP token for the pool.
-    /// 
-    /// # Arguments
-    /// * `witness` - LP witness token
-    /// * `ctx` - Transaction context
-    /// 
-    /// # Returns
-    /// * Treasury capability for the LP token
-    /// 
-    /// # Effects
-    /// * Creates a new LP token with specified metadata
-    /// * Freezes the token metadata
-    fun init_lp(witness: LP, ctx: &mut TxContext): TreasuryCap<LP> {
-        let (treasury, metadata) = coin::create_currency(witness, 9, b"SSLP", b"Stableswap LP", b"Token representing LP shares in a stableswap pool", option::none(), ctx);
-        transfer::public_freeze_object(metadata);
-        treasury
+    #[test_only]
+    public fun init_for_testing(ctx: &mut TxContext) {
+        init(ctx);
+    }
+
+    #[test_only]
+    public fun debug_pool_values(pool: &Pool) {
+        debug::print(&pool.values);
+    }
+
+    #[test_only]
+    public fun debug_pool_types(pool: &Pool) {
+        debug::print(&pool.types);
+    }
+
+    #[test_only]
+    public fun debug_pool_amp(pool: &Pool) {
+        debug::print(&pool.amp);
+    }
+
+    #[test_only]
+    public fun debug_pool_lp_supply(pool: &Pool) {
+        debug::print(&pool.lp_supply);
+    }
+
+    #[test_only]
+    public fun debug_pool_state(pool: &Pool) {
+        debug::print(&pool.values);
+        debug::print(&pool.types);
+        debug::print(&pool.amp);
+        debug::print(&pool.lp_supply);
+        debug::print(&pool.is_locked);
+        debug::print(&pool.is_killed);
     }
 }

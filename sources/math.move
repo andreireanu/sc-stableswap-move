@@ -1,4 +1,5 @@
 module stableswap::math {
+    use std::debug;
     
     // ======== Constants ========
     const MAX_ITERATIONS: u64 = 255;
@@ -40,8 +41,8 @@ module stableswap::math {
 
         // Initial guess for D using sum of values
         let mut d = s;
-        let mut d_prev;
-        let mut d_p;
+        let mut d_prev: u256;
+        let mut d_p : u256;
 
         // Newton's method
         i = 0;
@@ -54,6 +55,10 @@ module stableswap::math {
             while (j < n_coins) {
                 let balance = *values.borrow(j);
                 if (balance > 0) {
+                    debug::print(&d_p);
+                    debug::print(&d);
+                    debug::print(&balance);
+                    debug::print(&n_coins);
                     d_p = (d_p * d) / (balance * n_coins);
                 };
                 j = j + 1;
