@@ -40,8 +40,8 @@ module stableswap::deposit_test
                 &admin_cap,
                 owner,
                 100, // amp
-                4,   // fee (0.04%)
-                50,  // admin_fee (50% of fee)
+                0,   // fee (0.04%)
+                0,  // admin_fee (50% of fee)
                 lp_treasury,
                 ctx
             );
@@ -72,7 +72,7 @@ module stableswap::deposit_test
             stableswap::add_type<BTC4>(&admin_cap, &mut pool);
             stableswap::add_type<BTC5>(&admin_cap, &mut pool);
             stableswap::lock_pool(&admin_cap, &mut pool);
-            
+
             test_scenario::return_to_sender(&scenario, admin_cap);
             test_scenario::return_shared(pool);
         };
@@ -89,16 +89,16 @@ module stableswap::deposit_test
             let mut btc4_treasury = test_scenario::take_from_sender<TreasuryCap<BTC4>>(&scenario);
             let mut btc5_treasury = test_scenario::take_from_sender<TreasuryCap<BTC5>>(&scenario);
 
-            // Create deposit amounts vector (100_000_000_000 for each coin)
+            // Create deposit amounts vector  
             let mut values = vector::empty<u64>();
-            vector::push_back(&mut values, 100_000_000_000);
-            vector::push_back(&mut values, 100_000_000_000);
-            vector::push_back(&mut values, 100_000_000_000);
-            vector::push_back(&mut values, 100_000_000_000);
-            vector::push_back(&mut values, 100_000_000_000);
+            vector::push_back(&mut values, 1_000_100_000);
+            vector::push_back(&mut values, 1_000_200_000);
+            vector::push_back(&mut values, 1_000_300_000);
+            vector::push_back(&mut values, 1_000_400_000);
+            vector::push_back(&mut values, 1_000_500_000);
 
             // Print pool state before initialization
-            // stableswap::debug_pool_state(&pool);
+            // stableswap::debug_pool_state(&pool);0
 
             // Initialize liquidity addition
             let mut liquidity = stableswap::init_add_liquidity(&mut pool, values, 0);
@@ -106,20 +106,20 @@ module stableswap::deposit_test
             let ctx = test_scenario::ctx(&mut scenario);
 
             // Add liquidity for each coin type
-            let btc1_coin = coin::mint(&mut btc1_treasury, 100_000_000_000, ctx);
-            stableswap::add_liquidity(option::some(btc1_coin), &mut liquidity, &mut pool, ctx);
+            let btc1_coin = coin::mint(&mut btc1_treasury, 1_000_100_000, ctx);
+            stableswap::add_liquidity<BTC1>(option::some(btc1_coin), &mut liquidity, &mut pool, ctx);
 
-            let btc2_coin = coin::mint(&mut btc2_treasury, 100_000_000_000, ctx);
-            stableswap::add_liquidity(option::some(btc2_coin), &mut liquidity, &mut pool, ctx);
+            let btc2_coin = coin::mint(&mut btc2_treasury, 1_000_200_000, ctx);
+            stableswap::add_liquidity<BTC2>(option::some(btc2_coin), &mut liquidity, &mut pool, ctx);
 
-            let btc3_coin = coin::mint(&mut btc3_treasury, 100_000_000_000, ctx);
-            stableswap::add_liquidity(option::some(btc3_coin), &mut liquidity, &mut pool, ctx);
+            let btc3_coin = coin::mint(&mut btc3_treasury, 1_000_300_000, ctx);
+            stableswap::add_liquidity<BTC3>(option::some(btc3_coin), &mut liquidity, &mut pool, ctx);
 
-            let btc4_coin = coin::mint(&mut btc4_treasury, 100_000_000_000, ctx);
-            stableswap::add_liquidity(option::some(btc4_coin), &mut liquidity, &mut pool, ctx);
+            let btc4_coin = coin::mint(&mut btc4_treasury, 1_000_400_000, ctx);
+            stableswap::add_liquidity<BTC4>(option::some(btc4_coin), &mut liquidity, &mut pool, ctx);
 
-            let btc5_coin = coin::mint(&mut btc5_treasury, 100_000_000_000, ctx);
-            stableswap::add_liquidity(option::some(btc5_coin), &mut liquidity, &mut pool, ctx);
+            let btc5_coin = coin::mint(&mut btc5_treasury, 1_000_500_000, ctx);
+            stableswap::add_liquidity<BTC5>(option::some(btc5_coin), &mut liquidity, &mut pool, ctx);
 
             // Finish adding liquidity and get LP tokens
             let lp_coin = stableswap::finish_add_liquidity(liquidity, &mut pool, ctx);
