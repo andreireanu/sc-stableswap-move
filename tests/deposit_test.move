@@ -14,10 +14,12 @@ module stableswap::deposit_test
     use stableswap::btc3::{Self, BTC3};
     use stableswap::btc4::{Self, BTC4};
     use stableswap::btc5::{Self, BTC5};
+    use std::debug;
 
     #[test]
     fun test_deposit() {
         let owner = @0x0;
+        let swapper = @0x1;
 
         let mut scenario = test_scenario::begin(owner);
 
@@ -39,9 +41,9 @@ module stableswap::deposit_test
             stableswap::create_pool(
                 &admin_cap,
                 owner,
-                100, // amp
-                0,   // fee (0.04%)
-                0,  // admin_fee (50% of fee)
+                100,  
+                100, // 1% fee
+                10000,  // 100% fee goes to admin 
                 lp_treasury,
                 ctx
             );
@@ -124,6 +126,13 @@ module stableswap::deposit_test
             // Finish adding liquidity and get LP tokens
             let lp_coin = stableswap::finish_add_liquidity(liquidity, &mut pool, ctx);
             
+            let values = stableswap::get_pool_values(&pool);
+            assert!(vector::borrow(values, 0) == 1_000_100_000, 0);  // First coin balance after fees
+            assert!(vector::borrow(values, 1) == 1_000_200_000, 0);  // Second coin balance after fees
+            assert!(vector::borrow(values, 2) == 1_000_300_000, 0);  // Third coin balance after fees
+            assert!(vector::borrow(values, 3) == 1_000_400_000, 0);  // Fourth coin balance after fees
+            assert!(vector::borrow(values, 4) == 1_000_500_000, 0);  // Fifth coin balance after fees
+            
             // Send LP coin to the caller
             transfer::public_transfer(lp_coin, owner);
             
@@ -136,7 +145,51 @@ module stableswap::deposit_test
             
             test_scenario::return_shared(pool);
         };
-        
+
+        // Fifth transaction - add additional liquidity
+        test_scenario::next_tx(&mut scenario, owner);
+        {
+            let mut pool = test_scenario::take_shared<Pool>(&scenario);
+
+            // Get TreasuryCap for each coin type
+            let mut btc1_treasury = test_scenario::take_from_sender<TreasuryCap<BTC1>>(&scenario);
+
+            // Create deposit amounts vector  
+            let mut values = vector::empty<u64>();
+            vector::push_back(&mut values, 100_000_000);
+            vector::push_back(&mut values, 0);
+            vector::push_back(&mut values, 0);
+            vector::push_back(&mut values, 0);
+            vector::push_back(&mut values, 0);
+ 
+            // Initialize liquidity addition
+            let mut liquidity = stableswap::init_add_liquidity(&mut pool, values, 0);
+
+            let ctx = test_scenario::ctx(&mut scenario);
+
+            // Add liquidity for each coin type
+            let btc1_coin = coin::mint(&mut btc1_treasury, 100_000_000, ctx);
+            stableswap::add_liquidity<BTC1>(option::some(btc1_coin), &mut liquidity, &mut pool, ctx);
+
+            // Finish adding liquidity and get LP tokens
+            let lp_coin = stableswap::finish_add_liquidity(liquidity, &mut pool, ctx);
+            
+            let values = stableswap::get_pool_values(&pool);
+            assert!(vector::borrow(values, 0) == 1_099_851_988, 0);  // First coin balance after fees
+            assert!(vector::borrow(values, 1) == 1_000_138_007, 0);  // Second coin balance after fees
+            assert!(vector::borrow(values, 2) == 1_000_238_001, 0);  // Third coin balance after fees
+            assert!(vector::borrow(values, 3) == 1_000_337_994, 0);  // Fourth coin balance after fees
+            assert!(vector::borrow(values, 4) == 1_000_437_988, 0);  // Fifth coin balance after fees
+            
+            // Send LP coin to the caller
+            transfer::public_transfer(lp_coin, owner);
+            
+            // Return TreasuryCap objects
+            test_scenario::return_to_sender(&scenario, btc1_treasury);
+            
+            test_scenario::return_shared(pool);
+        };
+
         test_scenario::end(scenario);
     }
 }
