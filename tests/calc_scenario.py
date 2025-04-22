@@ -3,16 +3,28 @@ from scipy.optimize import fsolve
 import math
 from decimal import Decimal, getcontext
 
+# Constants
+FEE_DENOMINATOR = 10000
+fee_rate = 100  # 1% fee
+
 def calc_D(x_i_values, A, D_initial=None):
     """
     Calculate the D value for stable swap curve based on balances (x_i),
     amplification coefficient (A), and initial D guess.
     """
-    n = len(x_i_values)
+    from decimal import Decimal, getcontext, ROUND_DOWN
+    getcontext().prec = 78  # u256 equivalent precision
+    getcontext().rounding = ROUND_DOWN  # Match Move's integer division behavior
+    
+    # Convert inputs to Decimal and ensure they're integers
+    x_i_values = [Decimal(str(int(val))) for val in x_i_values]
+    A = Decimal(str(int(A)))
+    n = Decimal(str(len(x_i_values)))
     
     # If no initial D provided, use sum of balances as estimate
     if D_initial is None:
         D_initial = sum(x_i_values)
+    D_initial = Decimal(str(int(D_initial)))
     
     print(f"Calculating D with A={A}, n={n}")
     print(f"x_i = {x_i_values}")
@@ -34,65 +46,68 @@ def calculate_F(D, A, n, x_i):
     Calculate F(D) using the formula: F(D) = A·D·n^n + D_p - A·S·n^n - D
     With numerical stability for large values
     """
+    from decimal import Decimal
+    
     # Calculate S = Σx_i
     S = sum(x_i)
     
-    # Calculate D_p = D^(n+1)/(n^n·Πx_i) using logarithms for numerical stability
     try:
-        # Using logarithms to avoid overflow
-        log_numerator = (n+1) * math.log(D)
-        log_denominator = n * math.log(n) + sum(math.log(x) for x in x_i)
-        D_p = math.exp(log_numerator - log_denominator)
+        # Calculate D_p = D^(n+1)/(n^n·Πx_i)
+        numerator = D ** (n + Decimal('1'))
+        denominator = n ** n * math.prod(x_i)
+        D_p = numerator / denominator
+        
+        # Calculate F(D) with the corrected formula
+        F_D = A * D * n**n + D_p - A * S * n**n - D
+        
+        return F_D
     except (OverflowError, ValueError):
-        # Fallback for extreme values
-        if D == 0:
-            D_p = 0
-        else:
-            # Use high precision calculation
-            getcontext().prec = 50  # Set precision
-            D_dec = Decimal(D)
-            n_dec = Decimal(n)
-            x_i_dec = [Decimal(x) for x in x_i]
-            
-            numerator = D_dec ** (n_dec + Decimal('1'))
-            denominator = n_dec ** n_dec * math.prod(x_i_dec)
-            D_p = float(numerator / denominator)
-    
-    # Calculate F(D) with the corrected formula
-    F_D = A * D * n**n + D_p - A * S * n**n - D
-    
-    return F_D
+        # Use high precision calculation
+        getcontext().prec = 78
+        D_dec = D
+        n_dec = n
+        x_i_dec = x_i
+        
+        numerator = D_dec ** (n_dec + Decimal('1'))
+        denominator = n_dec ** n_dec * math.prod(x_i_dec)
+        D_p = numerator / denominator
+        
+        F_D = A * D * n**n + D_p - A * S * n**n - D
+        return F_D
 
 def calculate_F_prime(D, A, n, x_i):
     """
     Calculate F'(D) using the formula: F'(D) = A·n^n - 1 + ((n+1) / D) * D_p
     With numerical stability for large values
     """
-    if D == 0:
-        return float('inf')
+    from decimal import Decimal
     
-    # Calculate D_p = D^(n+1)/(n^n·Πx_i) using logarithms for numerical stability
+    if D == 0:
+        return Decimal('inf')
+    
     try:
-        # Using logarithms to avoid overflow
-        log_numerator = (n+1) * math.log(D)
-        log_denominator = n * math.log(n) + sum(math.log(x) for x in x_i)
-        D_p = math.exp(log_numerator - log_denominator)
+        # Calculate D_p = D^(n+1)/(n^n·Πx_i)
+        numerator = D ** (n + Decimal('1'))
+        denominator = n ** n * math.prod(x_i)
+        D_p = numerator / denominator
+        
+        # Calculate F'(D)
+        F_prime = A * n**n - Decimal('1') + ((n + Decimal('1')) / D) * D_p
+        
+        return F_prime
     except (OverflowError, ValueError):
-        # Fallback for extreme values
         # Use high precision calculation
-        getcontext().prec = 50  # Set precision
-        D_dec = Decimal(D)
-        n_dec = Decimal(n)
-        x_i_dec = [Decimal(x) for x in x_i]
+        getcontext().prec = 78
+        D_dec = D
+        n_dec = n
+        x_i_dec = x_i
         
         numerator = D_dec ** (n_dec + Decimal('1'))
         denominator = n_dec ** n_dec * math.prod(x_i_dec)
-        D_p = float(numerator / denominator)
-    
-    # Calculate F'(D) with the formula
-    F_prime = A * n**n - 1 + ((n+1) / D) * D_p
-    
-    return F_prime
+        D_p = numerator / denominator
+        
+        F_prime = A * n**n - Decimal('1') + ((n + Decimal('1')) / D) * D_p
+        return F_prime
 
 def F_wrapper(D, A, n, x_i):
     """
@@ -100,7 +115,8 @@ def F_wrapper(D, A, n, x_i):
     """
     # Ensure D is treated as scalar for our calculations
     D_scalar = D[0] if hasattr(D, "__len__") else D
-    return calculate_F(D_scalar, A, n, x_i)
+    D_scalar = Decimal(str(D_scalar))
+    return float(calculate_F(D_scalar, A, n, x_i))
 
 def F_prime_wrapper(D, A, n, x_i):
     """
@@ -108,15 +124,16 @@ def F_prime_wrapper(D, A, n, x_i):
     """
     # Ensure D is treated as scalar for our calculations
     D_scalar = D[0] if hasattr(D, "__len__") else D
+    D_scalar = Decimal(str(D_scalar))
     # Return as 1x1 array for fsolve
-    return np.array([calculate_F_prime(D_scalar, A, n, x_i)])
+    return np.array([float(calculate_F_prime(D_scalar, A, n, x_i))])
 
-def solve_for_D(A, n, x_i, D_initial=1.0):
+def solve_for_D(A, n, x_i, D_initial=Decimal('1.0')):
     """
     Solve for D using scipy.optimize.fsolve with improved numerical stability
     """
     # Prepare the initial guess
-    D0 = np.array([D_initial])
+    D0 = np.array([float(D_initial)])
     
     # Solve using fsolve
     try:
@@ -126,30 +143,27 @@ def solve_for_D(A, n, x_i, D_initial=1.0):
             args=(A, n, x_i), 
             fprime=F_prime_wrapper if D_initial != 0 else None,
             full_output=True,
-            xtol=1e-12  # Increased precision
+            xtol=1e-8,  # More lenient tolerance
+            maxfev=2000,  # More iterations
+            factor=0.1  # Smaller step size
         )
-        return D_solution[0], infodict, ier, mesg
-    except (OverflowError, FloatingPointError) as e:
-        print(f"Error in fsolve: {e}")
-        print("Trying alternative method...")
         
-        # Try with a different initial value that might be closer to solution
-        # A good estimate could be the sum of x_i values
-        D_estimate = sum(x_i)
-        print(f"Using new initial value: {D_estimate}")
-        try:
-            D_solution, infodict, ier, mesg = fsolve(
-                F_wrapper, 
-                np.array([D_estimate]), 
-                args=(A, n, x_i), 
-                fprime=None,  # Don't use analytical derivative for stability
-                full_output=True,
-                xtol=1e-12
-            )
-            return D_solution[0], infodict, ier, mesg
-        except Exception as e2:
-            print(f"Alternative method also failed: {e2}")
-            return None, None, 0, str(e2)
+        # Calculate the function value at the solution
+        f_val = F_wrapper(D_solution, A, n, x_i)
+        print(f"Function value at solution: {f_val}")
+        
+        # Convert back to Decimal
+        D_solution_dec = Decimal(str(D_solution[0]))
+        
+        # If the function value is close enough to zero, consider it a success
+        if abs(f_val) < 1e-6:
+            return D_solution_dec, infodict, 1, "Success"
+            
+        return D_solution_dec, infodict, ier, mesg
+        
+    except Exception as e:
+        print(f"Error in fsolve: {e}")
+        return None, None, 0, str(e)
 
 def calculate_imbalance_fees(x_i_initial, dx_i, A, fee_rate):
     """
@@ -201,7 +215,6 @@ def calculate_imbalance_fees(x_i_initial, dx_i, A, fee_rate):
     print(f"Calculated fee: {fee}")
     
     # Calculate fees using integer arithmetic to match Move contract
-    FEE_DENOMINATOR = 10000
     fees = [(d * fee) // FEE_DENOMINATOR for d in diffs]
     print(f"FEES: {fees}")
     
@@ -230,10 +243,97 @@ def calculate_imbalance_fees(x_i_initial, dx_i, A, fee_rate):
         "balances_final": x_i_final
     }
 
+def get_y(i, j, dx, x, amp, n):
+    """
+    Calculate the output amount for a given input amount using the StableSwap formula.
+    Using fsolve with the exact StableSwap function.
+    """
+    from decimal import Decimal, getcontext
+    from scipy.optimize import fsolve
+    import numpy as np
+    getcontext().prec = 78  # u256 equivalent precision
+    
+    # Convert inputs to Decimal and ensure they're integers
+    x = [Decimal(str(int(val))) for val in x]
+    dx = Decimal(str(int(dx)))
+    amp = Decimal(str(int(amp)))
+    n = Decimal(str(int(n)))
+    ann = amp * n**n  # Calculate ann exactly like Move
+    
+    # Calculate D with the current x array
+    d = Decimal(str(int(calc_D(x, amp, D_initial=sum(x)))))
+    
+    # Initialize c and s
+    c = d
+    s = Decimal('0')
+    
+    # Calculate S and c
+    for k in range(len(x)):
+        if k == i:
+            x_temp = x[k] + dx
+        elif k != j:
+            x_temp = x[k]
+        else:
+            continue
+        s += x_temp
+        c = Decimal(str(int((c * d) / (x_temp * n))))
+    
+    # Calculate final c
+    c = Decimal(str(int((c * d) / (ann * n))))
+    
+    def f(y):
+        """
+        The StableSwap function to solve:
+        f(y) = A * (n ** n) * (y ** 2) + y * (A * S * (n ** n) + d - A * d * (n ** n)) - c * A * (n ** n)
+        """
+        y = Decimal(str(y[0]))
+        term1 = ann * y * y
+        term2 = y * (ann * s + d - ann * d)
+        term3 = c * ann
+        return np.array([float(term1 + term2 - term3)])
+    
+    def fprime(y):
+        """
+        Derivative of the StableSwap function:
+        f'(y) = 2 * A * (n ** n) * y + (A * S * (n ** n) + d - A * d * (n ** n))
+        """
+        y = Decimal(str(y[0]))
+        term1 = 2 * ann * y
+        term2 = ann * s + d - ann * d
+        return np.array([[float(term1 + term2)]])
+    
+    # Initial guess
+    y0 = np.array([float(d)])
+    
+    # Solve using fsolve
+    y_sol = fsolve(f, y0, fprime=fprime, xtol=1e-8)[0]
+    
+    return int(y_sol)
+
+def exchange(i, j, dx, x, amp, n):
+    """
+    Calculate the output amount for a given input amount using the StableSwap formula.
+    Direct port of the Move code.
+    """
+    # Get the new balance of token j
+    y = get_y(i, j, dx, x, amp, n)
+    print(f"NEW y: {y}")
+    
+    # Calculate dy = x[j] - y
+    dy = int(x[j] - y)
+    
+    # Calculate and remove fee from dy
+    print(f"fee_rate: {fee_rate}")
+    fee = (dy * fee_rate) // FEE_DENOMINATOR
+    dy = dy - fee
+    
+    print(f"Fee removed: {fee}")
+    return dy
+
 def main():
     # Example with your specific values
     A = 100.0  # Using A=100 from your example
-    fee_rate = 100  # Using 4 for 0.04%
+    fee_rate = 100  #  
     
     # Large values test case
     x_i_initial = [1_000_100_000, 1_000_200_000, 1_000_300_000, 1_000_400_000, 1_000_500_000]
@@ -258,6 +358,22 @@ def main():
         print(f"Error with large values: {e}")
         import traceback
         traceback.print_exc()
+
+    # Calculate exchange scenario
+    print("\nExchange Scenario:")
+    print("-----------------")
+    x = [1_099_851_988, 1_000_138_007, 1_000_238_001, 1_000_337_994, 1_000_437_988]
+    dx = 1_000_000
+    i = 1  # BTC2 index
+    j = 2  # BTC3 index
+    amp = 100
+    n = 5
+
+    dy = exchange(i, j, dx, x, amp, n)
+    print(f"Input amount: {dx}")
+    print(f"Output amount: {dy}")
+    print(f"New BTC2 balance: {x[i] + dx}")
+    print(f"New BTC3 balance: {x[j] - dy}")
 
 if __name__ == "__main__":
     main()

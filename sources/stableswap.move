@@ -169,6 +169,8 @@ module stableswap::stableswap {
         assert!(pool.is_locked, EUnlockedPool);
         
         let n_coins = vector::length(&pool.types);
+        assert!(vector::length(&values) == n_coins, EInvalidCoinNumber);
+
         let amp = pool.amp;
         let admin_fee = pool.admin_fee;
         let token_supply = get_values_sum(&pool.values);
@@ -230,12 +232,6 @@ module stableswap::stableswap {
         };
 
         assert! (mint_amount > min_mint_amount, EInvalidMinMintAmount);
-
-        // let mut i = 0;
-        // while (i < vector::length(&admin_fees)) {
-        //     debug::print(vector::borrow(&admin_fees, i));
-        //     i = i + 1;
-        // };
 
         AddLiquidity {
             values,
@@ -354,7 +350,7 @@ module stableswap::stableswap {
     public fun remove_liquidity<I>(mut liquidity: RemoveLiquidity, pool: &mut Pool, ctx: &mut TxContext): (Coin<I>, RemoveLiquidity) {
         let lp_value = liquidity.balance.value();
         let type_str_i = type_name::into_string(type_name::get<I>());
-        let (i_present, i_index) = vector::index_of(&liquidity.types, &type_str_i); 
+        let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i); 
         assert!(i_present, EWrongLiquidityCoin);
         assert!(!vector::contains(&liquidity.types, &type_str_i), EAlreadyAddedCoin);
         liquidity.types.push_back(type_str_i);
@@ -434,7 +430,6 @@ module stableswap::stableswap {
         balance::join(fee_balances, coin::into_balance(dy_fee_coin));
 
         // TODO: Emit event with fee, dy_fee
-
         dy_coin
     }
 

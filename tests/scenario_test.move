@@ -261,6 +261,60 @@ module stableswap::deposit_test
             test_scenario::return_shared(pool);
         };
 
+        // Sixth transaction - transfer BTC2 TreasuryCap to swapper
+        test_scenario::next_tx(&mut scenario, owner);
+        {
+            let btc2_treasury = test_scenario::take_from_sender<TreasuryCap<BTC2>>(&scenario);
+            transfer::public_transfer(btc2_treasury, swapper);
+        };
+
+        // Seventh transaction - exchange BTC2 for BTC3
+        // Rate is 1_000_000 to 1_000_001 without accounting for fees
+        test_scenario::next_tx(&mut scenario, swapper);
+        {
+            let mut pool = test_scenario::take_shared<Pool>(&scenario);
+
+            // Get TreasuryCap for BTC2
+            let mut btc2_treasury = test_scenario::take_from_sender<TreasuryCap<BTC2>>(&scenario);
+
+            let ctx = test_scenario::ctx(&mut scenario);
+
+            // Mint BTC2 coin for exchange
+            let btc2_coin = coin::mint(&mut btc2_treasury, 1_000_000, ctx);
+
+            // Exchange BTC2 for BTC3 with minimum output of 0 (no slippage protection for testing)
+            let btc3_coin = stableswap::exchange_coin<BTC2, BTC3>(0, btc2_coin, &mut pool, ctx);
+            assert!(coin::value<BTC3>(&btc3_coin) == 990_001, 0);
+
+            // Assert values
+            let values = stableswap::get_pool_values(&pool);
+            assert!(vector::borrow(values, 0) == 1_099_851_988, 0);  // First coin value after fees
+            assert!(vector::borrow(values, 1) == 1_001_138_007, 0);  // Second coin value after fees
+            assert!(vector::borrow(values, 2) == 999_238_000, 0);    // Third coin value after fees
+            assert!(vector::borrow(values, 3) == 1_000_337_994, 0);  // Fourth coin value after fees
+            assert!(vector::borrow(values, 4) == 1_000_437_988, 0);  // Fifth coin value after fees
+
+            let values = stableswap::get_pool_values(&pool);
+            assert!(vector::borrow(values, 0) == 1_099_851_988, 0);  // BTC1 value
+            assert!(vector::borrow(values, 1) == 1_001_138_007, 0);  // BTC2 value  
+            assert!(vector::borrow(values, 2) == 999_238_000, 0);    // BTC3 value  
+            assert!(vector::borrow(values, 3) == 1_000_337_994, 0);  // BTC4 value
+            assert!(vector::borrow(values, 4) == 1_000_437_988, 0);  // BTC5 value
+
+            // Assert new BTC3 fee balances
+            let fee_balances = stableswap::get_pool_fee_balances(&pool);
+            let btc3_fee_balance = fee_balances.borrow<String, Balance<BTC3>>(type_name::into_string(type_name::get<BTC3>()));
+            assert!(balance::value(btc3_fee_balance) == 71999, 0);  // BTC3 fee balance
+
+            // Send BTC3 coin to the caller
+            transfer::public_transfer(btc3_coin, swapper);
+            
+            // Return TreasuryCap objects
+            test_scenario::return_to_sender(&scenario, btc2_treasury);
+            
+            test_scenario::return_shared(pool);
+        };
+
         test_scenario::end(scenario);
     }
 }

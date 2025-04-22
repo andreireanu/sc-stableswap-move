@@ -109,12 +109,13 @@ module stableswap::math {
         assert!(j < pool_n_coins, EInvalidCoin);
 
         // Get D and calculate Ann
-        let d = get_d(values, amp, pool_n_coins);
-        let ann = amp * pool_n_coins;
+        let d = get_d(values, amp, pool_n_coins) as u256;
+        let ann = (amp * pool_n_coins.pow(pool_n_coins as u8)) as u256;
+        let pool_n_coins_u256 = pool_n_coins as u256;
 
         // Initialize variables
         let mut c = d;
-        let mut s = 0;
+        let mut s : u256 = 0;
 
         // Calculate S_ and c
         let mut k = 0;
@@ -127,13 +128,15 @@ module stableswap::math {
                 k = k + 1;
                 continue
             };
-            s = s + x_temp;
-            c = (c * d) / (x_temp * pool_n_coins);
+            let x_temp_u256 = x_temp as u256;
+            s = s + x_temp_u256;
+            c = (c * d) / (x_temp_u256 * pool_n_coins_u256);
             k = k + 1;
+            
         };
 
         // Calculate c and b
-        c = (c * d) / (ann * pool_n_coins);
+        c = (c * d) / (ann * pool_n_coins_u256);
         let b = s + d / ann;
 
         // Newton's method for finding y
@@ -147,11 +150,13 @@ module stableswap::math {
             // Check for convergence
             if (y > y_prev) {
                 if (y - y_prev <= 1) {
-                    return y
+                    let y_u64 = y.try_as_u64().extract();   
+                    return y_u64
                 }
             } else {
                 if (y_prev - y <= 1) {
-                    return y
+                    let y_u64 = y.try_as_u64().extract();
+                    return y_u64
                 }
             };
 
