@@ -25,10 +25,11 @@ module stableswap::math {
         assert!(n_coins == pool_n_coins, EInvalidCoinNo);
 
         // Calculate sum of all values
-        let mut s = 0;
+        let mut s: u256 = 0;
         let mut i = 0;
+        let n_coins_u256 = n_coins as u256;
         while (i < n_coins) {
-            s = s + *values.borrow(i);
+            s = s + (*values.borrow(i) as u256);
             i = i + 1;
         };
 
@@ -37,7 +38,7 @@ module stableswap::math {
         };
 
         // Calculate Ann = A * n^n
-        let ann = amp * n_coins;
+        let ann = (amp * n_coins.pow(n_coins as u8)) as u256;
 
         // Initial guess for D using sum of values
         let mut d = s;
@@ -55,11 +56,7 @@ module stableswap::math {
             while (j < n_coins) {
                 let balance = *values.borrow(j);
                 if (balance > 0) {
-                    debug::print(&d_p);
-                    debug::print(&d);
-                    debug::print(&balance);
-                    debug::print(&n_coins);
-                    d_p = (d_p * d) / (balance * n_coins);
+                    d_p = (d_p * d) / ((balance as u256) * n_coins_u256);
                 };
                 j = j + 1;
             };
@@ -68,18 +65,20 @@ module stableswap::math {
             d_prev = d;
 
             // d = (Ann * S + D_P * n) * D / ((Ann - 1) * D + (n + 1) * D_P)
-            let numerator = (ann * s + d_p * n_coins) * d;
-            let denominator = (ann - 1) * d + (n_coins + 1) * d_p;
+            let numerator = (ann * s + d_p * n_coins_u256) * d;
+            let denominator = (ann - 1) * d + (n_coins_u256 + 1) * d_p;
             d = numerator / denominator;
 
             // Check for convergence with precision of 1
             if (d > d_prev) {
                 if (d - d_prev <= 1) {
-                    return d
+                    let d_u64 = d.try_as_u64().extract();
+                    return d_u64
                 }
             } else {
                 if (d_prev - d <= 1) {
-                    return d
+                    let d_u64 = d.try_as_u64().extract();
+                    return d_u64
                 }
             };
 

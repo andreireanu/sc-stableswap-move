@@ -14,17 +14,16 @@ module stableswap::stableswap {
 
     // ======== Errors ========
     const ESlippageExceeded: u64 = 1;
-    const EInvalidCoinNo: u64 = 2;
-    const EWrongCoinInType: u64 = 3;
-    const EWrongCoinOutType: u64 = 4;
-    const EWrongLiquidityCoin: u64 = 5;
-    const EUnlockedPool: u64 = 6;
-    const ELockedPool: u64 = 7;
-    const EInvalidFirstDeposit: u64 = 8;
-    const EAlreadyAddedCoin: u64 = 9;
-    const EInvalidDeposit: u64 = 10;
-    const EInvalidMinMintAmount: u64 = 11;
-    const EInvalidValue: u64 = 12;
+    const EWrongCoinInType: u64 = 2;
+    const EWrongCoinOutType: u64 = 3;
+    const EWrongLiquidityCoin: u64 = 4;
+    const EUnlockedPool: u64 = 5;
+    const ELockedPool: u64 = 6;
+    const EInvalidFirstDeposit: u64 = 7;
+    const EAlreadyAddedCoin: u64 = 8;
+    const EInvalidDeposit: u64 = 9;
+    const EInvalidMinMintAmount: u64 = 10;
+    const EInvalidCoinNumber: u64 = 11;
 
     // ======== Pool Structure ========
     public struct Pool has key {
@@ -46,8 +45,6 @@ module stableswap::stableswap {
     public struct AdminCap has key, store {  
         id: UID
     }
-
-
 
     // Structure to store liquidity while adding
     public struct AddLiquidity {         
@@ -187,7 +184,7 @@ module stableswap::stableswap {
         let mut new_values = add_values(&values, &pool.values);
         let d1 = get_d(&new_values, amp, n_coins);
         assert!(d1 > d0, EInvalidDeposit);
-        
+
         let mut d2 = d1; 
         let mut _total_fees = vector::empty<u64>();
         let mut admin_fees = vector::empty<u64>();
@@ -203,12 +200,15 @@ module stableswap::stableswap {
                 } else {
                     new_value - ideal_value
                 };
-                let total_fee = fee * difference / FEE_DENOMINATOR;
-                let fee =  total_fee * admin_fee  / FEE_DENOMINATOR;
-                *pool.values.borrow_mut(i) = new_value - fee; 
-                *new_values.borrow_mut(i) = new_value - total_fee; 
-                _total_fees.push_back(total_fee);
-                admin_fees.push_back(fee);
+                let total_fee_val = fee * difference / FEE_DENOMINATOR;
+                let admin_fee_val =  total_fee_val * admin_fee  / FEE_DENOMINATOR;
+                // We deduct the fee from the pool value to add to the admin fee
+                // The total fee is only removed for calculating the new D2 
+                // so the difference between total_fee and fee increases LP value
+                *pool.values.borrow_mut(i) = new_value - admin_fee_val; 
+                *new_values.borrow_mut(i) = new_value - total_fee_val; 
+                _total_fees.push_back(total_fee_val);
+                admin_fees.push_back(admin_fee_val);
                 i = i + 1;
             };
             d2 = get_d(&new_values, amp, n_coins);
@@ -231,7 +231,11 @@ module stableswap::stableswap {
 
         assert! (mint_amount > min_mint_amount, EInvalidMinMintAmount);
 
-        // TODO: Emit event with total fees 
+        // let mut i = 0;
+        // while (i < vector::length(&admin_fees)) {
+        //     debug::print(vector::borrow(&admin_fees, i));
+        //     i = i + 1;
+        // };
 
         AddLiquidity {
             values,
@@ -239,6 +243,7 @@ module stableswap::stableswap {
             types: vector::empty(),
             mint_amount: mint_amount,
         }
+
     }
 
     /// Adds liquidity for a specific coin type to the pool.
@@ -263,37 +268,34 @@ module stableswap::stableswap {
     public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: &mut AddLiquidity, pool: &mut Pool, ctx: &mut TxContext): &mut AddLiquidity {
         assert!(pool.is_locked, EUnlockedPool);
         let type_str_i = type_name::into_string(type_name::get<I>());
-        let (i_present, i_index) = vector::index_of(&liquidity.types, &type_str_i); 
+        let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i); 
         assert!(i_present, EWrongLiquidityCoin);
         assert!(!vector::contains(&liquidity.types, &type_str_i), EAlreadyAddedCoin);
         liquidity.types.push_back(type_str_i);
 
-
-        let mut dx_coin = option::extract(&mut dx_coin_option);
-        if (coin::value(&dx_coin) > 0) {
-            let dx_value = coin::value(&dx_coin);
-
-            assert!(liquidity.values.borrow(i_index) == dx_value, EInvalidDeposit);
-
-            let x_balance = pool.balances.borrow_mut(type_str_i);
-            let x_value = balance::value(x_balance);
-
-            let i_value = *pool.values.borrow(i_index);
-            let i_fee = *liquidity.admin_fees.borrow(i_index);
-            
-            assert!(i_value + i_fee == x_value + dx_value, EInvalidDeposit);
-
-            let fee_coin = coin::split<I>(&mut dx_coin, i_fee, ctx);
-            let dx_balance = coin::into_balance(dx_coin);
-            let fee_balance = coin::into_balance(fee_coin);
-            balance::join(x_balance, dx_balance);
-            let fee_balances = pool.fee_balances.borrow_mut(type_str_i);
-            balance::join(fee_balances, fee_balance);
+        let dx_coin = if (option::is_none(&dx_coin_option)) {
+            coin::zero<I>(ctx)
         } else {
-            assert!(*liquidity.values.borrow(i_index) == 0, EInvalidValue);
-            coin::destroy_zero(dx_coin);
+            option::extract(&mut dx_coin_option)
         };
+        let i_fee = *liquidity.admin_fees.borrow(i_index);
 
+        
+        let dx_value = coin::value(&dx_coin);
+        assert!(liquidity.values.borrow(i_index) == dx_value, EInvalidDeposit);
+
+        let x_balance = pool.balances.borrow_mut(type_str_i);
+        let x_value = balance::value(x_balance);
+
+        let i_value = *pool.values.borrow(i_index);
+        assert!(i_value + i_fee == x_value + dx_value, EInvalidDeposit);
+
+        let dx_balance = coin::into_balance(dx_coin);
+        let fee_balance = x_balance.split<I>(i_fee);
+        balance::join(x_balance, dx_balance);
+        let fee_balances = pool.fee_balances.borrow_mut(type_str_i);
+        balance::join(fee_balances, fee_balance);
+ 
         option::destroy_none(dx_coin_option);
         liquidity
     }
@@ -312,11 +314,11 @@ module stableswap::stableswap {
     /// * If the number of coin types doesn't match the pool's types
     public fun finish_add_liquidity(liquidity: AddLiquidity, pool: &mut Pool, ctx: &mut TxContext): Coin<LP> {
         let AddLiquidity { values: _, admin_fees: _, types, mint_amount } = liquidity;
-        assert!(types.length() == pool.types.length(), EInvalidCoinNo);
-        
+        assert!(types.length() == pool.types.length(), EInvalidCoinNumber);
+
         let coin = coin::mint(&mut pool.lp_treasury, mint_amount, ctx);
         pool.lp_supply = pool.lp_supply + mint_amount;
-        
+
         coin
     }
 
@@ -541,4 +543,25 @@ module stableswap::stableswap {
         debug::print(&pool.is_locked);
         debug::print(&pool.is_killed);
     }
+
+    #[test_only]
+    public fun get_pool_values(pool: &Pool): &vector<u64> {
+        &pool.values
+    }
+
+    #[test_only]
+    public fun get_pool_balances(pool: &Pool): &Bag {
+        &pool.balances
+    }
+
+    #[test_only]
+    public fun get_pool_fee_balances(pool: &Pool): &Bag {
+        &pool.fee_balances
+    }
+
+    #[test_only]
+    public fun get_pool_lp_supply(pool: &Pool): u64 {
+        pool.lp_supply
+    }
+
 }

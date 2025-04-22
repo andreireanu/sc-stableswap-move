@@ -203,7 +203,7 @@ def calculate_imbalance_fees(x_i_initial, dx_i, A, fee_rate):
     # Calculate fees using integer arithmetic to match Move contract
     FEE_DENOMINATOR = 10000
     fees = [(d * fee) // FEE_DENOMINATOR for d in diffs]
-    print(f"Fees: {fees}")
+    print(f"FEES: {fees}")
     
     # Calculate final balances after fees
     x_i_final = [b - f for b, f in zip(x_i_after_add, fees)]

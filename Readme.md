@@ -17,10 +17,11 @@ This calculates token out amount when token in amount is inserted in the pool
 ![Get Y Image](calculus/get_y.png)
 
 ##### add_liquidity  
-Add liquidity to the pool. In this example liquidity for coins D, E, C are added. After liquidity is added, if the pool becomes unbalanced fees from all coins might be deducted so we need to call update_balances for all coins in the pool
+This is done by calling *init_add_liquidity* using the coin values to be added, then adding the actual coins using *add_liquidity* and minting the LPs using *finish_add_liquidity*
 
-![Get Y Image](calculus/add_liquidity.jpg)
 
+#### Testing: 
+Testing includes a python script that validates test scenario calculations using an alternative method of applying Newton's method (*fsolve* from the *scipy* lib)
 
 #### References:
 StableSwap paper:           https://curve.fi/files/stableswap-paper.pdf \
