@@ -330,6 +330,43 @@ def exchange(i, j, dx, x, amp, n):
     print(f"Fee removed: {fee}")
     return dy
 
+def calculate_remove_liquidity(x, lp_supply, remove_lp):
+    """
+    Calculate the return amounts when removing liquidity.
+    
+    Args:
+        x: List of current pool balances [btc1, btc2, btc3, btc4, btc5]
+        lp_supply: Total LP token supply
+        remove_lp: Amount of LP tokens to remove
+        
+    Returns:
+        List of return amounts [btc1_return, btc2_return, btc3_return, btc4_return, btc5_return]
+    """
+    returns = []
+    for value in x:
+        coin_return = value * remove_lp // lp_supply
+        returns.append(coin_return)
+    
+
+    return returns
+
+def calculate_remaining_balances(x, returns):
+    """
+    Calculate the remaining balances after removing liquidity.
+    
+    Args:
+        x: List of current pool balances [btc1, btc2, btc3, btc4, btc5]
+        returns: List of return amounts [btc1_return, btc2_return, ...]
+        
+    Returns:
+        List of remaining balances [btc1_remaining, btc2_remaining, ...]
+    """
+    remaining = []
+    for initial, ret in zip(x, returns):
+        remaining.append(initial - ret)
+    
+    return remaining
+
 def main():
     # Example with your specific values
     A = 100.0  # Using A=100 from your example
@@ -374,6 +411,30 @@ def main():
     print(f"Output amount: {dy}")
     print(f"New BTC2 balance: {x[i] + dx}")
     print(f"New BTC3 balance: {x[j] - dy}")
+
+    # Pool values before removal
+    x = [1_099_851_988, 1_001_138_007, 999_238_000, 1_000_337_994, 1_000_437_988]
+    lp_supply = 5_101_003_917
+    remove_lp = 1_000_000_000
+
+    # Calculate remove liquidity returns
+    returns = calculate_remove_liquidity(x, lp_supply, remove_lp)
+
+    print("\nRemove Liquidity Transaction")
+    print("----------------------------------------------------")
+    print(f"LP tokens to remove: {remove_lp}")
+    print(f"Total LP supply: {lp_supply}")
+    print(f"Remaining LP supply: {lp_supply - remove_lp}")
+    for i, ret in enumerate(returns, 1):
+        print(f"BTC{i} return: {ret}")
+    
+    # Calculate remaining balances
+    remaining = calculate_remaining_balances(x, returns)
+
+    print("\nRemaining Balances After Remove")
+    print("----------------------------------------------------")
+    for i, rem in enumerate(remaining, 1):
+        print(f"BTC{i} remaining: {rem}")
 
 if __name__ == "__main__":
     main()
