@@ -1,5 +1,4 @@
 module stableswap::math {
-    use std::debug;
     
     // ======== Constants ========
     const MAX_ITERATIONS: u64 = 255;

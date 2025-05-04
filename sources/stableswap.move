@@ -261,7 +261,7 @@ module stableswap::stableswap {
     /// * If coin type is not in the pool
     /// * If coin type is already added in this liquidity operation
     /// * If deposit amount doesn't match expected value
-    public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: &mut AddLiquidity, pool: &mut Pool, ctx: &mut TxContext): &mut AddLiquidity {
+    public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: &mut AddLiquidity, pool: &mut Pool, ctx: &mut TxContext) {
         assert!(pool.is_locked, EUnlockedPool);
         let type_str_i = type_name::into_string(type_name::get<I>());
         let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i); 
@@ -293,7 +293,6 @@ module stableswap::stableswap {
         balance::join(fee_balances, fee_balance);
  
         option::destroy_none(dx_coin_option);
-        liquidity
     }
 
     /// Finalizes the liquidity addition process and mints LP tokens.
@@ -347,7 +346,7 @@ module stableswap::stableswap {
     /// # Aborts
     /// * If coin type is not in the pool
     /// * If coin type is already removed in this operation
-    public fun remove_liquidity<I>(mut liquidity: RemoveLiquidity, pool: &mut Pool, ctx: &mut TxContext): (Coin<I>, RemoveLiquidity) {
+    public fun remove_liquidity<I>(liquidity: &mut RemoveLiquidity, pool: &mut Pool, ctx: &mut TxContext): Coin<I>  {
         let lp_value = liquidity.balance.value();
         let type_str_i = type_name::into_string(type_name::get<I>());
         let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i); 
@@ -357,11 +356,8 @@ module stableswap::stableswap {
 
         let i_value = *pool.values.borrow(i_index);
         let return_value = i_value * lp_value / pool.lp_supply;
-
-        let i_coin =  pool.balances.borrow_mut(type_str_i);
-        let return_balance = balance::split<I>( i_coin, return_value);
-        let return_coin = coin::from_balance(return_balance, ctx);
-        (return_coin, liquidity)
+        let return_coin = decrease_balance(pool, type_str_i, i_index, return_value, ctx);
+        return_coin 
     }
 
     /// Finalizes the liquidity removal process and burns LP tokens.
@@ -375,7 +371,9 @@ module stableswap::stableswap {
     /// * Burns LP tokens
     /// * Updates pool's LP supply
     public fun finish_remove_liquidity(liquidity: RemoveLiquidity, pool: &mut Pool, ctx: &mut TxContext)  {
-        let RemoveLiquidity { balance, types: _ } = liquidity;
+        let RemoveLiquidity { balance, types } = liquidity;
+        assert!(types.length() == pool.types.length(), EInvalidCoinNumber);
+
         let value = balance.value();
         coin::burn(&mut pool.lp_treasury, coin::from_balance(balance, ctx));
         pool.lp_supply = pool.lp_supply - value;

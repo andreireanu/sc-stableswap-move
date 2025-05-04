@@ -1,5 +1,5 @@
 #[test_only]
-module stableswap::deposit_test
+module stableswap::invalid_min_lp_amout
 {
     use sui::coin::{Self, Coin, TreasuryCap};
     use sui::test_scenario;
@@ -14,8 +14,8 @@ module stableswap::deposit_test
     use sui::balance::{Self, Balance};
     use std::ascii::String;
 
-    #[test]
-    fun test_deposit() {
+    #[test, expected_failure(abort_code = ::stableswap::stableswap::EInvalidMinMintAmount)]
+    fun test_invalid_min_lp_amout() {
         let owner = @0x0;
         let swapper = @0x1;
 
@@ -97,8 +97,8 @@ module stableswap::deposit_test
             vector::push_back(&mut values, 1_000_400_000);
             vector::push_back(&mut values, 1_000_500_000);
 
-            // Initialize liquidity addition
-            let mut liquidity = stableswap::init_add_liquidity(&mut pool, values, 0);
+            // Initialize liquidity addition                                                              
+            let mut liquidity = stableswap::init_add_liquidity(&mut pool, values, 5001500000);
 
             let ctx = test_scenario::ctx(&mut scenario);
 

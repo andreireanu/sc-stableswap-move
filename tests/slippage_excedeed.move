@@ -1,5 +1,5 @@
 #[test_only]
-module stableswap::deposit_test
+module stableswap::test_slippage_excedeed
 {
     use sui::coin::{Self, Coin, TreasuryCap};
     use sui::test_scenario;
@@ -14,8 +14,8 @@ module stableswap::deposit_test
     use sui::balance::{Self, Balance};
     use std::ascii::String;
 
-    #[test]
-    fun test_deposit() {
+    #[test, expected_failure(abort_code = ::stableswap::stableswap::ESlippageExceeded)]
+    fun test_slippage_excedeed() {
         let owner = @0x0;
         let swapper = @0x1;
 
@@ -275,7 +275,7 @@ module stableswap::deposit_test
             let btc2_coin = coin::mint(&mut btc2_treasury, 1_000_000, ctx);
 
             // Exchange BTC2 for BTC3 with minimum output of 0 (no slippage protection for testing)
-            let btc3_coin = stableswap::exchange_coin<BTC2, BTC3>(0, btc2_coin, &mut pool, ctx);
+            let btc3_coin = stableswap::exchange_coin<BTC2, BTC3>(1_100_000, btc2_coin, &mut pool, ctx);
             assert!(coin::value<BTC3>(&btc3_coin) == 990_001, 0);
 
             // Assert values

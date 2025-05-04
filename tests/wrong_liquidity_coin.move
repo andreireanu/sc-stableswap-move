@@ -1,5 +1,5 @@
 #[test_only]
-module stableswap::deposit_test
+module stableswap::wrong_liquidity_coin
 {
     use sui::coin::{Self, Coin, TreasuryCap};
     use sui::test_scenario;
@@ -14,8 +14,8 @@ module stableswap::deposit_test
     use sui::balance::{Self, Balance};
     use std::ascii::String;
 
-    #[test]
-    fun test_deposit() {
+    #[test, expected_failure(abort_code = ::stableswap::stableswap::EWrongLiquidityCoin)]
+    fun test_wrong_liquidity_coin() {
         let owner = @0x0;
         let swapper = @0x1;
 
@@ -66,7 +66,6 @@ module stableswap::deposit_test
             let admin_cap = test_scenario::take_from_sender<AdminCap>(&scenario);
             let mut pool = test_scenario::take_shared<Pool>(&scenario);
 
-            stableswap::add_type<BTC1>(&admin_cap, &mut pool);
             stableswap::add_type<BTC2>(&admin_cap, &mut pool);
             stableswap::add_type<BTC3>(&admin_cap, &mut pool);
             stableswap::add_type<BTC4>(&admin_cap, &mut pool);
@@ -91,7 +90,6 @@ module stableswap::deposit_test
 
             // Create deposit amounts vector  
             let mut values = vector::empty<u64>();
-            vector::push_back(&mut values, 1_000_100_000);
             vector::push_back(&mut values, 1_000_200_000);
             vector::push_back(&mut values, 1_000_300_000);
             vector::push_back(&mut values, 1_000_400_000);

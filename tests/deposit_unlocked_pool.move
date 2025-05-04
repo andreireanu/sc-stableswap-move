@@ -1,5 +1,5 @@
 #[test_only]
-module stableswap::deposit_test
+module stableswap::deposit_unlocked_pool
 {
     use sui::coin::{Self, Coin, TreasuryCap};
     use sui::test_scenario;
@@ -14,8 +14,8 @@ module stableswap::deposit_test
     use sui::balance::{Self, Balance};
     use std::ascii::String;
 
-    #[test]
-    fun test_deposit() {
+    #[test, expected_failure(abort_code = ::stableswap::stableswap::EUnlockedPool)]
+    fun test_deposit_unlocked_pool() {
         let owner = @0x0;
         let swapper = @0x1;
 
@@ -71,7 +71,6 @@ module stableswap::deposit_test
             stableswap::add_type<BTC3>(&admin_cap, &mut pool);
             stableswap::add_type<BTC4>(&admin_cap, &mut pool);
             stableswap::add_type<BTC5>(&admin_cap, &mut pool);
-            stableswap::lock_pool(&admin_cap, &mut pool);
 
             test_scenario::return_to_sender(&scenario, admin_cap);
             test_scenario::return_shared(pool);

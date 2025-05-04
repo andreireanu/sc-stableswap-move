@@ -1,5 +1,5 @@
 #[test_only]
-module stableswap::deposit_test
+module stableswap::invalid_coin_no_add_liq
 {
     use sui::coin::{Self, Coin, TreasuryCap};
     use sui::test_scenario;
@@ -14,8 +14,8 @@ module stableswap::deposit_test
     use sui::balance::{Self, Balance};
     use std::ascii::String;
 
-    #[test]
-    fun test_deposit() {
+    #[test, expected_failure(abort_code = ::stableswap::stableswap::EInvalidCoinNumber)]
+    fun test_invalid_coin_no_add_liq() {
         let owner = @0x0;
         let swapper = @0x1;
 
@@ -87,7 +87,6 @@ module stableswap::deposit_test
             let mut btc2_treasury = test_scenario::take_from_sender<TreasuryCap<BTC2>>(&scenario);
             let mut btc3_treasury = test_scenario::take_from_sender<TreasuryCap<BTC3>>(&scenario);
             let mut btc4_treasury = test_scenario::take_from_sender<TreasuryCap<BTC4>>(&scenario);
-            let mut btc5_treasury = test_scenario::take_from_sender<TreasuryCap<BTC5>>(&scenario);
 
             // Create deposit amounts vector  
             let mut values = vector::empty<u64>();
@@ -95,7 +94,6 @@ module stableswap::deposit_test
             vector::push_back(&mut values, 1_000_200_000);
             vector::push_back(&mut values, 1_000_300_000);
             vector::push_back(&mut values, 1_000_400_000);
-            vector::push_back(&mut values, 1_000_500_000);
 
             // Initialize liquidity addition
             let mut liquidity = stableswap::init_add_liquidity(&mut pool, values, 0);
@@ -114,9 +112,6 @@ module stableswap::deposit_test
 
             let btc4_coin = coin::mint(&mut btc4_treasury, 1_000_400_000, ctx);
             stableswap::add_liquidity<BTC4>(option::some(btc4_coin), &mut liquidity, &mut pool, ctx);
-
-            let btc5_coin = coin::mint(&mut btc5_treasury, 1_000_500_000, ctx);
-            stableswap::add_liquidity<BTC5>(option::some(btc5_coin), &mut liquidity, &mut pool, ctx);
 
             // Finish adding liquidity and get LP tokens
             let lp_coin = stableswap::finish_add_liquidity(liquidity, &mut pool, ctx);
@@ -139,8 +134,6 @@ module stableswap::deposit_test
             assert!(balance::value(btc3_balance) == 1_000_300_000, 0);  // BTC3 balance
             let btc4_balance = balances.borrow<String, Balance<BTC4>>(type_name::into_string(type_name::get<BTC4>()));
             assert!(balance::value(btc4_balance) == 1_000_400_000, 0);  // BTC4 balance
-            let btc5_balance = balances.borrow<String, Balance<BTC5>>(type_name::into_string(type_name::get<BTC5>()));
-            assert!(balance::value(btc5_balance) == 1_000_500_000, 0);  // BTC5 balance
 
             // Assert fee balances
             let fee_balances = stableswap::get_pool_fee_balances(&pool);
@@ -152,8 +145,6 @@ module stableswap::deposit_test
             assert!(balance::value(btc3_fee_balance) == 0, 0);  // BTC3 fee balance
             let btc4_fee_balance = fee_balances.borrow<String, Balance<BTC4>>(type_name::into_string(type_name::get<BTC4>()));
             assert!(balance::value(btc4_fee_balance) == 0, 0);  // BTC4 fee balance
-            let btc5_fee_balance = fee_balances.borrow<String, Balance<BTC5>>(type_name::into_string(type_name::get<BTC5>()));
-            assert!(balance::value(btc5_fee_balance) == 0, 0);  // BTC5 fee balance
             
             // Verify LP supply  
             assert!(stableswap::get_pool_lp_supply(&pool) == 5001499999, 0);   
@@ -166,7 +157,6 @@ module stableswap::deposit_test
             test_scenario::return_to_sender(&scenario, btc2_treasury);
             test_scenario::return_to_sender(&scenario, btc3_treasury);
             test_scenario::return_to_sender(&scenario, btc4_treasury);
-            test_scenario::return_to_sender(&scenario, btc5_treasury);
             
             test_scenario::return_shared(pool);
         };
