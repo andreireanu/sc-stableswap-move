@@ -1,5 +1,5 @@
 #[test_only]
-module stableswap::deposit_test
+module stableswap::scenario_test
 {
     use sui::coin::{Self, Coin, TreasuryCap};
     use sui::test_scenario;
@@ -15,7 +15,7 @@ module stableswap::deposit_test
     use std::ascii::String;
 
     #[test]
-    fun test_deposit() {
+    fun scenario_test() {
         let owner = @0x0;
         let swapper = @0x1;
 
@@ -286,17 +286,31 @@ module stableswap::deposit_test
             assert!(vector::borrow(values, 3) == 1_000_337_994, 0);  // Fourth coin value after fees
             assert!(vector::borrow(values, 4) == 1_000_437_988, 0);  // Fifth coin value after fees
 
-            let values = stableswap::get_pool_values(&pool);
-            assert!(vector::borrow(values, 0) == 1_099_851_988, 0);  // BTC1 value
-            assert!(vector::borrow(values, 1) == 1_001_138_007, 0);  // BTC2 value  
-            assert!(vector::borrow(values, 2) == 999_238_000, 0);    // BTC3 value  
-            assert!(vector::borrow(values, 3) == 1_000_337_994, 0);  // BTC4 value
-            assert!(vector::borrow(values, 4) == 1_000_437_988, 0);  // BTC5 value
+            // Assert balances
+            let balances = stableswap::get_pool_balances(&pool);
+            let btc1_balance = balances.borrow<String, Balance<BTC1>>(type_name::into_string(type_name::get<BTC1>()));
+            assert!(balance::value(btc1_balance) == 1_099_851_988, 0);  // BTC1 balance
+            let btc2_balance = balances.borrow<String, Balance<BTC2>>(type_name::into_string(type_name::get<BTC2>()));
+            assert!(balance::value(btc2_balance) == 1_001_138_007, 0);  // BTC2 balance
+            let btc3_balance = balances.borrow<String, Balance<BTC3>>(type_name::into_string(type_name::get<BTC3>()));
+            assert!(balance::value(btc3_balance) == 999_238_000, 0);  // BTC3 balance
+            let btc4_balance = balances.borrow<String, Balance<BTC4>>(type_name::into_string(type_name::get<BTC4>()));
+            assert!(balance::value(btc4_balance) == 1_000_337_994, 0);  // BTC4 balance
+            let btc5_balance = balances.borrow<String, Balance<BTC5>>(type_name::into_string(type_name::get<BTC5>()));
+            assert!(balance::value(btc5_balance) == 1_000_437_988, 0);  // BTC5 balance
 
-            // Assert new BTC3 fee balances
+            // Assert fee balances
             let fee_balances = stableswap::get_pool_fee_balances(&pool);
+            let btc1_fee_balance = fee_balances.borrow<String, Balance<BTC1>>(type_name::into_string(type_name::get<BTC1>()));
+            assert!(balance::value(btc1_fee_balance) == 248_012, 0);  // BTC1 fee balance
+            let btc2_fee_balance = fee_balances.borrow<String, Balance<BTC2>>(type_name::into_string(type_name::get<BTC2>()));
+            assert!(balance::value(btc2_fee_balance) == 61_993, 0);  // BTC2 fee balance
             let btc3_fee_balance = fee_balances.borrow<String, Balance<BTC3>>(type_name::into_string(type_name::get<BTC3>()));
             assert!(balance::value(btc3_fee_balance) == 71_999, 0);  // BTC3 fee balance
+            let btc4_fee_balance = fee_balances.borrow<String, Balance<BTC4>>(type_name::into_string(type_name::get<BTC4>()));
+            assert!(balance::value(btc4_fee_balance) == 62_006, 0);  // BTC4 fee balance
+            let btc5_fee_balance = fee_balances.borrow<String, Balance<BTC5>>(type_name::into_string(type_name::get<BTC5>()));
+            assert!(balance::value(btc5_fee_balance) == 62_012, 0);  // BTC5 fee balance
 
             // Send BTC3 coin to the caller
             transfer::public_transfer(btc3_coin, swapper);
@@ -307,7 +321,7 @@ module stableswap::deposit_test
             test_scenario::return_shared(pool);
         };
 
-        // Eighth transaction - remove liquidity
+        // Eighth transaction - remove liquidity all coins
         test_scenario::next_tx(&mut scenario, owner);
         {
             let mut pool = test_scenario::take_shared<Pool>(&scenario);
@@ -374,6 +388,67 @@ module stableswap::deposit_test
             transfer::public_transfer(lp_coin, owner);
             test_scenario::return_shared(pool);
         };
+
+        // Ninth transaction - remove liquidity one coin BTC1
+        test_scenario::next_tx(&mut scenario, owner);
+        {
+            let mut pool = test_scenario::take_shared<Pool>(&scenario);
+            let mut lp_coin = test_scenario::take_from_sender<Coin<LP>>(&scenario);
+            let ctx = test_scenario::ctx(&mut scenario);
+
+            // Split 1_000_000_000 LP tokens for removal
+            let remove_lp = coin::split(&mut lp_coin, 1_000_000_000, ctx);
+
+            // Remove liquidity in BTC1 only
+            let btc1_coin = stableswap::remove_liquidity_one_coin<BTC1>( &mut pool, remove_lp, 0, 0, ctx);
+
+            // Assert the received amounts
+            assert!(coin::value(&btc1_coin) == 880_072_112, 0);
+
+            // Assert values
+            let values = stableswap::get_pool_values(&pool);
+            assert!(vector::borrow(values, 0) == 2_091_934, 0);   
+            assert!(vector::borrow(values, 1) == 804_875_071, 0);  
+            assert!(vector::borrow(values, 2) == 803_347_541, 0);  
+            assert!(vector::borrow(values, 3) == 804_231_893, 0);   
+            assert!(vector::borrow(values, 4) == 804_312_284, 0);  
+
+            // Assert balances
+            let balances = stableswap::get_pool_balances(&pool);
+            let btc1_balance = balances.borrow<String, Balance<BTC1>>(type_name::into_string(type_name::get<BTC1>()));
+            assert!(balance::value(btc1_balance) == 2_091_934, 0);  // BTC1 balance
+            let btc2_balance = balances.borrow<String, Balance<BTC2>>(type_name::into_string(type_name::get<BTC2>()));
+            assert!(balance::value(btc2_balance) == 804_875_071, 0);  // BTC2 balance
+            let btc3_balance = balances.borrow<String, Balance<BTC3>>(type_name::into_string(type_name::get<BTC3>()));
+            assert!(balance::value(btc3_balance) == 803_347_541, 0);  // BTC3 balance
+            let btc4_balance = balances.borrow<String, Balance<BTC4>>(type_name::into_string(type_name::get<BTC4>()));
+            assert!(balance::value(btc4_balance) == 804_231_893, 0);  // BTC4 balance
+            let btc5_balance = balances.borrow<String, Balance<BTC5>>(type_name::into_string(type_name::get<BTC5>()));
+            assert!(balance::value(btc5_balance) == 804_312_284, 0);  // BTC5 balance
+
+            // Assert fee balances
+            let fee_balances = stableswap::get_pool_fee_balances(&pool);
+            let btc1_fee_balance = fee_balances.borrow<String, Balance<BTC1>>(type_name::into_string(type_name::get<BTC1>()));
+            assert!(balance::value(btc1_fee_balance) == 2_321_145, 0);  // BTC1 fee balance
+            let btc2_fee_balance = fee_balances.borrow<String, Balance<BTC2>>(type_name::into_string(type_name::get<BTC2>()));
+            assert!(balance::value(btc2_fee_balance) == 61_993, 0);  // BTC2 fee balance
+            let btc3_fee_balance = fee_balances.borrow<String, Balance<BTC3>>(type_name::into_string(type_name::get<BTC3>()));
+            assert!(balance::value(btc3_fee_balance) == 71_999, 0);  // BTC3 fee balance
+            let btc4_fee_balance = fee_balances.borrow<String, Balance<BTC4>>(type_name::into_string(type_name::get<BTC4>()));
+            assert!(balance::value(btc4_fee_balance) == 62_006, 0);  // BTC4 fee balance
+            let btc5_fee_balance = fee_balances.borrow<String, Balance<BTC5>>(type_name::into_string(type_name::get<BTC5>()));
+            assert!(balance::value(btc5_fee_balance) == 62_012, 0);  // BTC5 fee balance
+
+            // Verify LP supply  
+            assert!(stableswap::get_pool_lp_supply(&pool) == 3_101_003_917, 0);  // LP supply after remove liquidity
+
+            // Transfer coins back to owner
+            transfer::public_transfer(btc1_coin, owner);
+
+            // Return remaining LP tokens to owner
+            transfer::public_transfer(lp_coin, owner);
+            test_scenario::return_shared(pool);
+        };    
 
         test_scenario::end(scenario);
     }

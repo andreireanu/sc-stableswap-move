@@ -416,13 +416,12 @@ module stableswap::stableswap {
         let y_new = exchange(i_index, j_index, dx, pool);
         let y_value = pool.values.borrow(j_index);
         let dy = *y_value - y_new;
-        assert!(dy >= min_dy, ESlippageExceeded);
+        let fee = dy * pool.fee / FEE_DENOMINATOR;
+        assert!(dy - fee >= min_dy, ESlippageExceeded);
 
         increase_balance(pool, type_str_i, i_index, dx_coin); 
+
         let mut dy_coin = decrease_balance<J>(pool, type_str_j, j_index, dy, ctx); 
-        
-        let dy_value = coin::value(&dy_coin);
-        let fee = dy_value * pool.fee / FEE_DENOMINATOR;
         let dy_fee_coin = coin::split<J>(&mut dy_coin, fee, ctx);
         let fee_balances = pool.fee_balances.borrow_mut(type_str_j);
         balance::join(fee_balances, coin::into_balance(dy_fee_coin));
@@ -530,20 +529,21 @@ module stableswap::stableswap {
         assert!(dy >= min_amount, ESlippageExceeded);
 
         let admin_fee = dy_fee * pool.admin_fee / FEE_DENOMINATOR;
+        let coin_value = dy - dy_fee;
 
         let type_str_i = type_name::into_string(type_name::get<I>());
         let (i_present, i_index) = pool.types.index_of(&type_str_i);
         assert!(i_present, EWrongCoinOutType);
 
+        let admin_fee_coin = decrease_balance<I>(pool, type_str_i, i_index, admin_fee, ctx); 
+        let admin_fee_balance = coin::into_balance(admin_fee_coin);
         let fee_balances = pool.fee_balances.borrow_mut(type_str_i);
-        let i_balance = pool.balances.borrow_mut(type_str_i);
-        let admin_fee_balance = balance::split<I>(i_balance, admin_fee);
         balance::join(fee_balances, admin_fee_balance);
 
         coin::burn(&mut pool.lp_treasury, lp_coin);
         pool.lp_supply = pool.lp_supply - lp_amount;
 
-        let dy_coin = decrease_balance<I>(pool, type_str_i, i_index, dy, ctx); 
+        let dy_coin = decrease_balance<I>(pool, type_str_i, i_index, coin_value, ctx); 
 
         dy_coin
     }
@@ -572,6 +572,7 @@ module stableswap::stableswap {
         let d1 = d0 - (lp_amount * d0 / total_supply);
 
         let new_y = get_y_d(i, &pool.values, d1, amp, n_coins);
+
         let value_i = *pool.values.borrow(i);   
         let dy_0 = value_i - new_y;  
         let mut reduced_values = vector::empty<u64>();
