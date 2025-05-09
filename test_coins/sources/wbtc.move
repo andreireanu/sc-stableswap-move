@@ -1,4 +1,4 @@
-module stableswap::wbtc {
+module test_coins::wbtc {
     use sui::coin::{Self, TreasuryCap};
 
     public struct WBTC has drop {}

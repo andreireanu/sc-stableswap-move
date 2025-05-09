@@ -1,15 +1,15 @@
-module stableswap::rbtc {
+module test_coins::zbtc {
     use sui::coin::{Self, TreasuryCap};
 
-    public struct RBTC has drop {}
+    public struct ZBTC has drop {}
 
-    /// Initialize the rBTC coin
-    fun init(witness: RBTC, ctx: &mut TxContext) {
+    /// Initialize the zBTC coin
+    fun init(witness: ZBTC, ctx: &mut TxContext) {
         let (treasury, metadata) = coin::create_currency(
             witness,
             8,
             b"BTC",
-            b"R Bitcoin",
+            b"Z Bitcoin",
             b"",
             option::none(),
             ctx
@@ -18,8 +18,8 @@ module stableswap::rbtc {
         transfer::public_transfer(treasury, tx_context::sender(ctx));
     }
 
-    /// Mint new rBTC coins
-    public fun mint(treasury: &mut TreasuryCap<RBTC>, amount: u64, ctx: &mut TxContext): coin::Coin<RBTC> {
+    /// Mint new zBTC coins
+    public fun mint(treasury: &mut TreasuryCap<ZBTC>, amount: u64, ctx: &mut TxContext): coin::Coin<ZBTC> {
         coin::mint(treasury, amount, ctx)
     }
 } 

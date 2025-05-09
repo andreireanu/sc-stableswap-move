@@ -1,6 +1,7 @@
 # SC StableSwap Move
 
 A Move implementation of the StableSwap protocol, based on Curve's StableSwap algorithm. This implementation provides a way to create and manage pools of stablecoins with low slippage and efficient trading.
+It can support an arbitrary number of tokens, which was a key design consideration in the implementation.
  
 ## Implementation Details
 
@@ -86,6 +87,7 @@ This step:
 - Calculates the expected LP tokens to mint based on the provided amounts
 - Verifies the amounts are valid for the pool
 - Prepares the liquidity addition process
+- Returns a [hot-potato](https://move-book.com/programmability/hot-potato-pattern.html) object to be used in subsequent calls
 
 #### 2. Add Each Coin
 ```move
@@ -159,6 +161,7 @@ This step:
 - Splits the desired amount of LP tokens for removal
 - Prepares the removal process
 - Calculates the expected amounts for each coin
+- Returns a [hot-potato](https://move-book.com/programmability/hot-potato-pattern.html) object to be used in subsequent calls
 
 #### 2. Remove Each Coin
 ```move

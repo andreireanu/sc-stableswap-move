@@ -1,15 +1,15 @@
-module stableswap::sbtc {
+module test_coins::pbtc {
     use sui::coin::{Self, TreasuryCap};
 
-    public struct SBTC has drop {}
+    public struct PBTC has drop {}
 
-    /// Initialize the sBTC coin
-    fun init(witness: SBTC, ctx: &mut TxContext) {
+    /// Initialize the pBTC coin
+    fun init(witness: PBTC, ctx: &mut TxContext) {
         let (treasury, metadata) = coin::create_currency(
             witness,
             8,
-            b"sBTC",
-            b"S Bitcoin",
+            b"BTC",
+            b"P Bitcoin",
             b"",
             option::none(),
             ctx
@@ -18,8 +18,8 @@ module stableswap::sbtc {
         transfer::public_transfer(treasury, tx_context::sender(ctx));
     }
 
-    /// Mint new sBTC coins
-    public fun mint(treasury: &mut TreasuryCap<SBTC>, amount: u64, ctx: &mut TxContext): coin::Coin<SBTC> {
+    /// Mint new pBTC coins
+    public fun mint(treasury: &mut TreasuryCap<PBTC>, amount: u64, ctx: &mut TxContext): coin::Coin<PBTC> {
         coin::mint(treasury, amount, ctx)
     }
 } 
