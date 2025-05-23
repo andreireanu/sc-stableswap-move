@@ -1,5 +1,4 @@
 module stableswap::math {
-    use std::debug;
     
     // ======== Constants ========
     const MAX_ITERATIONS: u64 = 255;
@@ -146,6 +145,80 @@ module stableswap::math {
         while (k < MAX_ITERATIONS) {
             y_prev = y;
             y = (y * y + c) / (2 * y + b - d);
+
+            // Check for convergence
+            if (y > y_prev) {
+                if (y - y_prev <= 1) {
+                    let y_u64 = y.try_as_u64().extract();   
+                    return y_u64
+                }
+            } else {
+                if (y_prev - y <= 1) {
+                    let y_u64 = y.try_as_u64().extract();
+                    return y_u64
+                }
+            };
+
+            k = k + 1;
+        };
+
+        abort ENoConvergence
+    }
+
+    /// Calculates the output amount for a given input amount.
+    /// * `i` - Index of the output coin
+    /// * `values` - Vector of current values
+    /// * `d` - The invariant D
+    /// * `amp` - Amplification coefficient
+    /// * `pool_n_coins` - Number of coins in the pool
+    /// 
+    /// # Returns
+    /// * The output amount y that satisfies the StableSwap equation 
+    ///   for given D 
+    /// 
+    /// # Aborts
+    /// * If i is out of bounds
+    /// * If the Newton iteration does not converge
+    public fun get_y_d(i: u64, values: &vector<u64>, d: u64, amp: u64, pool_n_coins: u64): u64 {
+        // Input validation
+        assert!(i >= 0, EInvalidCoin);
+        assert!(i < pool_n_coins, EInvalidCoin);
+
+        // Get D and calculate Ann
+        let ann = (amp * pool_n_coins.pow(pool_n_coins as u8)) as u256;
+        let pool_n_coins_u256 = pool_n_coins as u256;
+        let d_u256 = d as u256;
+
+        // Initialize variables
+        let mut c = d_u256;
+        let mut s : u256 = 0;
+
+        // Calculate S_ and c
+        let mut k = 0;
+        while (k < pool_n_coins) {
+            let x_temp = if (k == i) {
+                k = k + 1;
+                continue
+            } else {
+                *values.borrow(k)
+            };
+            let x_temp_u256 = x_temp as u256;
+            s = s + x_temp_u256;
+            c = (c * d_u256) / (x_temp_u256 * pool_n_coins_u256);
+            k = k + 1;
+        };
+
+        // Calculate c and b
+        c = (c * d_u256) / (ann * pool_n_coins_u256);
+        let b = s + d_u256 / ann;
+
+        // Newton's method for finding y
+        let mut y = d_u256;
+        let mut y_prev;
+        let mut k = 0;
+        while (k < MAX_ITERATIONS) {
+            y_prev = y;
+            y = (y * y + c) / (2 * y + b - d_u256);
 
             // Check for convergence
             if (y > y_prev) {

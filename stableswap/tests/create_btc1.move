@@ -7,7 +7,7 @@ module stableswap::btc1 {
     fun init(witness: BTC1, ctx: &mut TxContext) {
         let (treasury, metadata) = coin::create_currency(
             witness,
-            8,
+            9,
             b"BTC1",
             b"Bitcoin 1",
             b"",

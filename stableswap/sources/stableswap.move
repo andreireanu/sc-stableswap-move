@@ -6,7 +6,7 @@ module stableswap::stableswap {
     use sui::bag::{Self, Bag};
     use std::ascii::String;
     use stableswap::lp::LP;
-    use stableswap::math::{get_d, get_y, get_values_sum, add_values, valid_first_deposit, empty_values};
+    use stableswap::math::{get_d, get_y, get_y_d, get_values_sum, add_values, valid_first_deposit, empty_values};
     use std::debug;
 
     // ======== Constants ========
@@ -261,7 +261,7 @@ module stableswap::stableswap {
     /// * If coin type is not in the pool
     /// * If coin type is already added in this liquidity operation
     /// * If deposit amount doesn't match expected value
-    public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: &mut AddLiquidity, pool: &mut Pool, ctx: &mut TxContext): &mut AddLiquidity {
+    public fun add_liquidity<I>(mut dx_coin_option: Option<Coin<I>>, liquidity: &mut AddLiquidity, pool: &mut Pool, ctx: &mut TxContext) {
         assert!(pool.is_locked, EUnlockedPool);
         let type_str_i = type_name::into_string(type_name::get<I>());
         let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i); 
@@ -293,7 +293,6 @@ module stableswap::stableswap {
         balance::join(fee_balances, fee_balance);
  
         option::destroy_none(dx_coin_option);
-        liquidity
     }
 
     /// Finalizes the liquidity addition process and mints LP tokens.
@@ -347,7 +346,7 @@ module stableswap::stableswap {
     /// # Aborts
     /// * If coin type is not in the pool
     /// * If coin type is already removed in this operation
-    public fun remove_liquidity<I>(mut liquidity: RemoveLiquidity, pool: &mut Pool, ctx: &mut TxContext): (Coin<I>, RemoveLiquidity) {
+    public fun remove_liquidity<I>(liquidity: &mut RemoveLiquidity, pool: &mut Pool, ctx: &mut TxContext): Coin<I>  {
         let lp_value = liquidity.balance.value();
         let type_str_i = type_name::into_string(type_name::get<I>());
         let (i_present, i_index) = vector::index_of(&pool.types, &type_str_i); 
@@ -357,11 +356,8 @@ module stableswap::stableswap {
 
         let i_value = *pool.values.borrow(i_index);
         let return_value = i_value * lp_value / pool.lp_supply;
-
-        let i_coin =  pool.balances.borrow_mut(type_str_i);
-        let return_balance = balance::split<I>( i_coin, return_value);
-        let return_coin = coin::from_balance(return_balance, ctx);
-        (return_coin, liquidity)
+        let return_coin = decrease_balance(pool, type_str_i, i_index, return_value, ctx);
+        return_coin 
     }
 
     /// Finalizes the liquidity removal process and burns LP tokens.
@@ -375,7 +371,9 @@ module stableswap::stableswap {
     /// * Burns LP tokens
     /// * Updates pool's LP supply
     public fun finish_remove_liquidity(liquidity: RemoveLiquidity, pool: &mut Pool, ctx: &mut TxContext)  {
-        let RemoveLiquidity { balance, types: _ } = liquidity;
+        let RemoveLiquidity { balance, types } = liquidity;
+        assert!(types.length() == pool.types.length(), EInvalidCoinNumber);
+
         let value = balance.value();
         coin::burn(&mut pool.lp_treasury, coin::from_balance(balance, ctx));
         pool.lp_supply = pool.lp_supply - value;
@@ -418,13 +416,12 @@ module stableswap::stableswap {
         let y_new = exchange(i_index, j_index, dx, pool);
         let y_value = pool.values.borrow(j_index);
         let dy = *y_value - y_new;
-        assert!(dy >= min_dy, ESlippageExceeded);
+        let fee = dy * pool.fee / FEE_DENOMINATOR;
+        assert!(dy - fee >= min_dy, ESlippageExceeded);
 
         increase_balance(pool, type_str_i, i_index, dx_coin); 
+
         let mut dy_coin = decrease_balance<J>(pool, type_str_j, j_index, dy, ctx); 
-        
-        let dy_value = coin::value(&dy_coin);
-        let fee = dy_value * pool.fee / FEE_DENOMINATOR;
         let dy_fee_coin = coin::split<J>(&mut dy_coin, fee, ctx);
         let fee_balances = pool.fee_balances.borrow_mut(type_str_j);
         balance::join(fee_balances, coin::into_balance(dy_fee_coin));
@@ -503,6 +500,101 @@ module stableswap::stableswap {
         let pool_values = &pool.values;
         get_y(i, j, dx, pool_values, amp, pool_n_coins)
     }
+
+    /// Remove liquidity in a single coin.
+    /// 
+    /// # Arguments
+    /// * `pool` - The pool to remove liquidity from
+    /// * `token_amount` - Amount of LP tokens to burn
+    /// * `i` - Index of the coin to withdraw
+    /// * `min_amount` - Minimum amount of coin to receive
+    /// * `ctx` - Transaction context
+    /// 
+    /// # Returns
+    /// * The amount of coin received
+    /// 
+    /// # Aborts
+    /// * If pool is killed
+    /// * If amount received is less than min_amount
+    /// * If i is out of bounds
+    public fun remove_liquidity_one_coin<I>(
+        pool: &mut Pool,
+        lp_coin: Coin<LP>,
+        i: u64,
+        min_amount: u64,
+        ctx: &mut TxContext
+    ): Coin<I> {
+        let lp_amount = coin::value(&lp_coin);
+        let (dy, dy_fee) = calc_withdraw_one_coin(pool, lp_amount, i);
+        assert!(dy >= min_amount, ESlippageExceeded);
+
+        let admin_fee = dy_fee * pool.admin_fee / FEE_DENOMINATOR;
+        let coin_value = dy - dy_fee;
+
+        let type_str_i = type_name::into_string(type_name::get<I>());
+        let (i_present, i_index) = pool.types.index_of(&type_str_i);
+        assert!(i_present, EWrongCoinOutType);
+
+        let admin_fee_coin = decrease_balance<I>(pool, type_str_i, i_index, admin_fee, ctx); 
+        let admin_fee_balance = coin::into_balance(admin_fee_coin);
+        let fee_balances = pool.fee_balances.borrow_mut(type_str_i);
+        balance::join(fee_balances, admin_fee_balance);
+
+        coin::burn(&mut pool.lp_treasury, lp_coin);
+        pool.lp_supply = pool.lp_supply - lp_amount;
+
+        let dy_coin = decrease_balance<I>(pool, type_str_i, i_index, coin_value, ctx); 
+
+        dy_coin
+    }
+
+    /// Calculate the amount of a single coin that can be withdrawn and the associated fee.
+    /// 
+    /// # Arguments
+    /// * `pool` - The pool to calculate withdrawal from
+    /// * `lp_amount` - Amount of LP tokens to burn
+    /// * `i` - Index of the coin to withdraw
+    /// 
+    /// # Returns
+    /// * Tuple containing (amount to withdraw, fee amount)
+    /// 
+    /// # Aborts
+    /// * If i is out of bounds
+    fun calc_withdraw_one_coin(pool: &Pool, lp_amount: u64, i: u64): (u64, u64) {
+        let n_coins = vector::length(&pool.types);
+        assert!(i < n_coins, EInvalidCoinNumber);
+
+        let amp = pool.amp;
+        let fee = pool.fee * n_coins / (4 * (n_coins - 1)); // TODO: Check how this is calculated
+        let total_supply = pool.lp_supply;
+
+        let d0 = get_d(&pool.values, amp, n_coins);
+        let d1 = d0 - (lp_amount * d0 / total_supply);
+
+        let new_y = get_y_d(i, &pool.values, d1, amp, n_coins);
+
+        let value_i = *pool.values.borrow(i);   
+        let dy_0 = value_i - new_y;  
+        let mut reduced_values = vector::empty<u64>();
+
+        let mut j = 0;
+        while (j < n_coins) {
+            let value_j = *pool.values.borrow(j); 
+            let dj_expected = if (j == i) {
+                value_j * d1 / d0 - new_y
+            } else {
+                value_j - value_j * d1 / d0
+            };
+            let reduced_value = value_j - (fee * dj_expected / FEE_DENOMINATOR);
+            j = j + 1;
+            reduced_values.push_back(reduced_value);
+        };
+
+        let dy = *reduced_values.borrow(i) - get_y_d (i, &reduced_values, d1, amp, n_coins);
+
+        (dy, dy_0 - dy)
+    }
+
 
     #[test_only]
     public fun init_for_testing(ctx: &mut TxContext) {

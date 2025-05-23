@@ -367,10 +367,134 @@ def calculate_remaining_balances(x, returns):
     
     return remaining
 
+def get_y_d(i, values, d, amp, pool_n_coins):
+    """
+    Calculate the output amount for a given input amount using the StableSwap formula.
+    Using fsolve with the exact StableSwap function.
+    """
+    from decimal import Decimal, getcontext
+    from scipy.optimize import fsolve
+    import numpy as np
+    getcontext().prec = 78  # u256 equivalent precision
+    
+    # Convert inputs to Decimal and ensure they're integers
+    values = [Decimal(str(int(val))) for val in values]
+    d = Decimal(str(int(d)))
+    amp = Decimal(str(int(amp)))
+    n = Decimal(str(int(pool_n_coins)))
+    ann = amp * n**n  # Calculate ann exactly like Move
+    
+    # Initialize c and s
+    c = d
+    s = Decimal('0')
+    
+    # Calculate S and c
+    for k in range(len(values)):
+        if k == i:
+            continue
+        x_temp = values[k]
+        s += x_temp
+        c = Decimal(str(int((c * d) / (x_temp * n))))
+    
+    # Calculate final c
+    c = Decimal(str(int((c * d) / (ann * n))))
+    
+    def f(y):
+        """
+        The StableSwap function to solve:
+        f(y) = A * (n ** n) * (y ** 2) + y * (A * S * (n ** n) + d - A * d * (n ** n)) - c * A * (n ** n)
+        """
+        y = Decimal(str(y[0]))
+        term1 = ann * y * y
+        term2 = y * (ann * s + d - ann * d)
+        term3 = c * ann
+        return np.array([float(term1 + term2 - term3)])
+    
+    def fprime(y):
+        """
+        Derivative of the StableSwap function:
+        f'(y) = 2 * A * (n ** n) * y + (A * S * (n ** n) + d - A * d * (n ** n))
+        """
+        y = Decimal(str(y[0]))
+        term1 = 2 * ann * y
+        term2 = ann * s + d - ann * d
+        return np.array([[float(term1 + term2)]])
+    
+    # Initial guess
+    y0 = np.array([float(d)])
+    
+    # Solve using fsolve
+    y_sol = fsolve(f, y0, fprime=fprime, xtol=1e-8)[0]
+    
+    return int(y_sol)
+
+def calc_withdraw_one_coin(pool_values, lp_amount, i, amp, fee, total_supply):
+    """
+    Calculate the amount of a single coin that can be withdrawn and the associated fee.
+    Direct port of the Move calc_withdraw_one_coin function.
+    """
+    n_coins = len(pool_values)
+    if i >= n_coins:
+        raise ValueError("Invalid coin index")
+
+    # Calculate fee
+    fee = fee * n_coins // (4 * (n_coins - 1))
+
+    # Calculate D values
+    d0 = calc_D(pool_values, amp)
+    d1 = d0 - (lp_amount * d0 // total_supply)
+
+    # Calculate new y value
+    new_y = get_y_d(i, pool_values, d1, amp, n_coins)
+    value_i = pool_values[i]
+    dy_0 = value_i - new_y
+
+    # Calculate reduced values
+    reduced_values = []
+    for j in range(n_coins):
+        value_j = pool_values[j]
+        if j == i:
+            dj_expected = value_j * d1 // d0 - new_y
+        else:
+            dj_expected = value_j - value_j * d1 // d0
+        reduced_value = value_j - (fee * dj_expected // FEE_DENOMINATOR)
+        reduced_values.append(reduced_value)
+
+    # Calculate final dy
+    dy = reduced_values[i] - get_y_d(i, reduced_values, d1, amp, n_coins)
+
+    return dy, dy_0 - dy
+
+def remove_liquidity_one_coin(pool_values, lp_amount, i, min_amount, amp, fee_rate, total_supply):
+    """
+    Remove liquidity for a single coin type.
+    Direct port of the Move remove_liquidity_one_coin function.
+    
+    Args:
+        pool_values: List of current pool balances
+        lp_amount: Amount of LP tokens to burn
+        i: Index of the coin to withdraw
+        min_amount: Minimum amount to receive (slippage protection)
+        amp: Amplification coefficient
+        fee_rate: Fee rate (e.g., 100 for 1%)
+        total_supply: Total LP token supply
+        
+    Returns:
+        withdrawal amount 
+    """
+    # Calculate withdrawal amount and fee
+    dy, dy_fee = calc_withdraw_one_coin(pool_values, lp_amount, i, amp, fee_rate, total_supply)
+    
+    # Check slippage
+    if dy < min_amount:
+        raise ValueError("Slippage exceeded")
+    
+    return (dy, dy_fee)
+
 def main():
     # Example with your specific values
     A = 100.0  # Using A=100 from your example
-    fee_rate = 100  #  
+    fee_rate = 100  # 1% fee
     
     # Large values test case
     x_i_initial = [1_000_100_000, 1_000_200_000, 1_000_300_000, 1_000_400_000, 1_000_500_000]
@@ -417,14 +541,27 @@ def main():
     lp_supply = 5_101_003_917
     remove_lp = 1_000_000_000
 
-    # Calculate remove liquidity returns
-    returns = calculate_remove_liquidity(x, lp_supply, remove_lp)
-
     print("\nRemove Liquidity Transaction")
     print("----------------------------------------------------")
     print(f"LP tokens to remove: {remove_lp}")
     print(f"Total LP supply: {lp_supply}")
     print(f"Remaining LP supply: {lp_supply - remove_lp}")
+
+    # Test remove_liquidity_one_coin for each coin
+    print("\nRemove Liquidity One Coin Tests")
+    print("----------------------------------------------------")
+    for i in range(len(x)):
+        try:
+            dy, dy_fee = remove_liquidity_one_coin(x, remove_lp, i, 0, amp, fee_rate, lp_supply)
+            print(f"\nBTC{i+1} removal:")
+            print(f"Withdrawal amount: {dy}")
+            print(f"Fee amount: {dy_fee}")
+            print(f"Remaining balance: {x[i] - dy}")
+        except Exception as e:
+            print(f"Error removing BTC{i+1}: {e}")
+
+    # Calculate remove liquidity returns for all coins
+    returns = calculate_remove_liquidity(x, lp_supply, remove_lp)
     for i, ret in enumerate(returns, 1):
         print(f"BTC{i} return: {ret}")
     
@@ -435,6 +572,26 @@ def main():
     print("----------------------------------------------------")
     for i, rem in enumerate(remaining, 1):
         print(f"BTC{i} remaining: {rem}")
+
+    # Test remove_liquidity_one_coin for BTC1
+    print("\nRemove Liquidity One Coin Test for BTC1")
+    print("----------------------------------------------------")
+    # Use the remaining balances after first removal
+    x = [884_237_179, 804_875_071, 803_347_541, 804_231_893, 804_312_284]
+    lp_supply = 4_101_003_917  # Remaining LP supply after first removal
+    remove_lp = 1_000_000_000
+    min_amount = 0  # No slippage protection for testing
+
+    try:
+        (dy, dy_fee) = remove_liquidity_one_coin(x, remove_lp, 0, min_amount, amp, fee_rate, lp_supply)
+        print(f"LP tokens to remove: {remove_lp}")
+        print(f"Total LP supply: {lp_supply}")
+        print(f"Remaining LP supply: {lp_supply - remove_lp}")
+        print(f"BTC1 withdrawal amount: {dy - dy_fee}")
+        print(f"Fee: {dy_fee}")
+        print(f"BTC1 remaining balance: {x[0] - dy}")
+    except Exception as e:
+        print(f"Error removing BTC1: {e}")
 
 if __name__ == "__main__":
     main()
