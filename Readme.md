@@ -2,13 +2,7 @@
 
 A Move implementation of the StableSwap protocol, based on Curve's StableSwap algorithm. This implementation provides a way to create and manage pools of stablecoins with low slippage and efficient trading.
 It can support an arbitrary number of tokens, which was a key design consideration in the implementation.
-
-## Links
-
-- [Frontend repo](https://github.com/buidly/sui-sbtc-bridge/tree/main/frontend)
-- [Backend repo](https://github.com/buidly/sui-sbtc-bridge/tree/main/microservice)
-- [Demo](https://demo.tideflow.app/)
-
+ 
 ## Implementation Details
 
 ### Pool Creation
